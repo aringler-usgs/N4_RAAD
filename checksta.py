@@ -15,82 +15,99 @@ mpl.rc('font',serif='Times')
 mpl.rc('text', usetex=True)
 mpl.rc('font',size=14)
 
+def get_data(nets, eve, phase):
+    st = Stream()
+    for net in nets:
+        for sta in net:
+            for chan in sta:
+                if chan.code == 'HHZ':
+                    if debug:
+                        print(sta.code)
+                    coors = nets.get_coordinates(net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code )
+                    if debug:
+                        print(coors)
+        
+                    ## Time to ray trace
+                    (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude,eve.origins[0].longitude)
+                    ## This might be a distance in m.
+                    dis = kilometer2degrees(dis/1000.)
+                    arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=dis, phase_list=[phase])
+                    for arrival in arrivals:
+
+                        winlen = 50.
+                    
+                        pstime = (eve.origins[0].time + arrival.time)-5.
+                        petime = pstime + winlen
+                        if debug:
+                            print(net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
+                            print(pstime)
+                            print(petime) 
+                        try:
+                        #if True:
+                            st += client.get_waveforms(net.code, sta.code, chan.location_code, chan.code, pstime, petime, attach_response = True)
+                        except:
+                            print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
+    return st
+
+
+
 
 
 debug = True
 # We want to N4 check this station via the Rebecca, Andrew, Adam method
-net, staGOOD = 'N4', 'Z38B'
+net, staGOOD = 'N4', 'I45A'
 
 client = Client("IRIS")
 
-stime = UTCDateTime('2019-001T00:00:00')
-etime = stime + 30*24*60*60
+stime = UTCDateTime('2018-001T00:00:00')
+etime = UTCDateTime('2019-150T00:00:00')
 
 
 inv = client.get_stations(network=net, station=staGOOD,
                             channel = 'HHZ', level="response",
                             starttime=stime, endtime = etime)
 if debug:
-    print(inv)
+    print(inv[0][0][0].code)
 
 # We know where our station is 
-coors = inv.get_coordinates(net + '.' + staGOOD + '..HHZ')
+coors = inv.get_coordinates(inv[0].code + '.' + inv[0][0].code + '.' + inv[0][0][0].location_code + '.' + inv[0][0][0].code)
 
-stas = client.get_stations(stime, etime, network = net, channel="*HZ",
-            longitude=coors['longitude'], latitude=coors['latitude'], maxradius = 3., level="channel")[0]
+nets = client.get_stations(stime, etime, channel="*HZ",
+            longitude=coors['longitude'], latitude=coors['latitude'], maxradius = 2., level="channel")
 
 if debug:
-    print(stas) 
+    print(nets) 
 
 # We will want to play with this to figure out the correct events for the phase of interest
-cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=6.0, latitude=coors['latitude'], 
+cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=6.5, latitude=coors['latitude'], 
                         longitude=coors['longitude'], maxradius=85., minradius = 30.)
-                        
 for eve in cat:
+    print(eve)   
+
+
+
+times, amps, corrs = [], [], []
+for eve in cat:
+    print(eve)
     # We have our events we have our stations and our test station
-    st = Stream()
-    for sta in stas:
-        for chan in sta:
-
-            if chan.code == 'BHZ':
-                if debug:
-                    print(sta.code)
-                coors = stas.get_coordinates(net + '.' + sta.code +'..HHZ')
-                if debug:
-                    print(coors)
     
-                ## Time to ray trace
-                (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude,eve.origins[0].longitude)
-                ## This might be a distance in m.
-                dis = kilometer2degrees(dis/1000.)
-                arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=dis, phase_list=['P'])
-                for arrival in arrivals:
-
-                    winlen = 20.
-                
-                    pstime = (eve.origins[0].time + arrival.time)-5.
-                    petime = pstime + winlen
-                    if debug:
-                        print(net + ' ' + sta.code + ' ' + chan.code)
-                        print(pstime)
-                        print(petime) 
-                    try:
-                        st += client.get_waveforms(net, sta.code, '*', chan.code, pstime, petime, attach_response = True)
-                    except:
-                        continue
-    
-    
+     st = get_data(nets, eve, 'P')   
+        
+    if debug:
+        print(st)
     # Now we have the data so lets cross-correlate and stack
     #st.plot()
     st.detrend('constant')
     st.taper(0.05)
     
     st.remove_response()
-    st.filter('bandpass',freqmin=0.1, freqmax=5.)
-    trRef = st.select(station=staGOOD)[0]
+    st.filter('bandpass',freqmin=0.01, freqmax=0.5)
     
+    trRef = st.select(station=staGOOD)
+    print(trRef)
+    trRef = trRef[0]
     
-    fig = plt.figure(1)
+    #fig = plt.figure(1, figsize=(8,8))
     for tr in st:
         idx, val = xcorr(tr, trRef, 50)
         if debug:
@@ -100,16 +117,25 @@ for eve in cat:
         plt.plot(t - float(idx)/40., tr.data, label= tr.id + ' ' + str(val))
         plt.xlabel('Time (s)')
         plt.ylabel('Velocity (m/s)')
-        tr.stats.starttime -= float(idx)/40.
+        tr.stats.starttime -= float(idx)/100.
         if 'stack' not in vars():
             stack = tr.data
         else:
             stack += tr.data
     stack /= float(len(st))
+    
+    idx, val = xcorr(trRef, stack, 50)
+    amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
+    amps.append(amp)
+    times.append(float(idx)/100.)
+    corrs.append(val)
     plt.plot(t, stack, color = 'C1', linewidth=3, label ='Stack')
     plt.xlim((min(t), max(t)))
     plt.legend()
-    plt.savefig('FULL_CODA.jpg', format='JPEG')
-    plt.show()
+    #plt.savefig('FULL_CODA.jpg', format='JPEG')
+    #plt.show()
     del stack
-    sys.exit()
+    
+print(amps)
+print(times)
+print(corrs)
