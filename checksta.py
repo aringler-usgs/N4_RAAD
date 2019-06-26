@@ -15,12 +15,13 @@ mpl.rc('font',serif='Times')
 mpl.rc('text', usetex=True)
 mpl.rc('font',size=14)
 
-def get_data(nets, eve, phase):
+def get_data(nets, eve, phase, debug = True):
     st = Stream()
     for net in nets:
         for sta in net:
             for chan in sta:
-                if chan.code == 'HHZ':
+                # Here we need to deal with different channel codes e.g. BH and HH should probably get compared
+                if chan.code == 'LHZ':
                     if debug:
                         print(sta.code)
                     coors = nets.get_coordinates(net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code )
@@ -30,24 +31,35 @@ def get_data(nets, eve, phase):
                     ## Time to ray trace
                     (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude,eve.origins[0].longitude)
                     ## This might be a distance in m.
-                    dis = kilometer2degrees(dis/1000.)
-                    arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=dis, phase_list=[phase])
-                    for arrival in arrivals:
-
-                        winlen = 50.
-                    
-                        pstime = (eve.origins[0].time + arrival.time)-5.
-                        petime = pstime + winlen
+                    if phase == 'R':
+                        # Using surface waves
+                        dis /= 1000.
+                        arrivtime = dis / 5.5
+                        winlen = dis / 3.5
+                        pstime = (eve.origins[0].time + arrivtime)
+                        petime = (eve.origins[0].time + winlen)
+                        
+                    else:
+                        dis = kilometer2degrees(dis/1000.)
+                        arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=dis, phase_list=[phase])
                         if debug:
-                            print(net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
-                            print(pstime)
-                            print(petime) 
-                        try:
-                        #if True:
-                            st += client.get_waveforms(net.code, sta.code, chan.location_code, chan.code, pstime, petime, attach_response = True)
-                        except:
-                            print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
-    return st
+                            print(arrivals)
+                        for arrival in arrivals:
+
+                            winlen = 100.
+                        
+                            pstime = (eve.origins[0].time + arrival.time)-5.
+                            petime = pstime + winlen
+                    if debug:
+                        print(net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
+                        print(pstime)
+                        print(petime) 
+                    try:
+                    #if True:
+                        st += client.get_waveforms(net.code, sta.code, chan.location_code, chan.code, pstime, petime, attach_response = True)
+                    except:
+                        print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
+        return st
 
 
 
@@ -55,16 +67,17 @@ def get_data(nets, eve, phase):
 
 debug = True
 # We want to N4 check this station via the Rebecca, Andrew, Adam method
-net, staGOOD = 'N4', 'I45A'
+net, staGOOD = 'IU', 'COR'
 
 client = Client("IRIS")
 
 stime = UTCDateTime('2018-001T00:00:00')
 etime = UTCDateTime('2019-150T00:00:00')
 
+# Need to correct channels for BH and HH at the stame time.  We also need to remove LH
 
 inv = client.get_stations(network=net, station=staGOOD,
-                            channel = 'HHZ', level="response",
+                            channel = 'LHZ', level="response",
                             starttime=stime, endtime = etime)
 if debug:
     print(inv[0][0][0].code)
@@ -79,11 +92,12 @@ if debug:
     print(nets) 
 
 # We will want to play with this to figure out the correct events for the phase of interest
+
+# We should pick our event parameters for the correct phase e.g. shallow for rayleigh
+
 cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=6.5, latitude=coors['latitude'], 
                         longitude=coors['longitude'], maxradius=85., minradius = 30.)
-for eve in cat:
-    print(eve)   
-
+  
 
 
 times, amps, corrs = [], [], []
@@ -91,10 +105,11 @@ for eve in cat:
     print(eve)
     # We have our events we have our stations and our test station
     
-     st = get_data(nets, eve, 'P')   
+    st = get_data(nets, eve, 'P')   
         
     if debug:
         print(st)
+    sys.exit()
     # Now we have the data so lets cross-correlate and stack
     #st.plot()
     st.detrend('constant')
@@ -103,13 +118,15 @@ for eve in cat:
     st.remove_response()
     st.filter('bandpass',freqmin=0.01, freqmax=0.5)
     
+    print(st)
     trRef = st.select(station=staGOOD)
     print(trRef)
     trRef = trRef[0]
     
+    # Need to add an off/on flag for plotting events
     #fig = plt.figure(1, figsize=(8,8))
     for tr in st:
-        idx, val = xcorr(tr, trRef, 50)
+        idx, val = xcorr(tr, trRef, 20)
         if debug:
             print(idx)
             print(val)
@@ -124,7 +141,7 @@ for eve in cat:
             stack += tr.data
     stack /= float(len(st))
     
-    idx, val = xcorr(trRef, stack, 50)
+    idx, val = xcorr(trRef, stack, 20)
     amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
     amps.append(amp)
     times.append(float(idx)/100.)
@@ -132,8 +149,8 @@ for eve in cat:
     plt.plot(t, stack, color = 'C1', linewidth=3, label ='Stack')
     plt.xlim((min(t), max(t)))
     plt.legend()
-    #plt.savefig('FULL_CODA.jpg', format='JPEG')
-    #plt.show()
+    plt.savefig('FULL_CODA.jpg', format='JPEG')
+    plt.show()
     del stack
     
 print(amps)
