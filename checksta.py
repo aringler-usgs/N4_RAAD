@@ -27,7 +27,8 @@ def get_data(nets, eve, phase, winlen, dis, debug = True):
         for sta in net:
             for chan in sta:
                 # Here we need to deal with different channel codes e.g. BH and HH should probably get compared
-                if chan.code == 'HHZ':
+                #if chan.code == 'HHZ':
+                if True:
                     if debug:
                         print(sta.code)
                     # grab station coordinates
@@ -65,6 +66,43 @@ def get_data(nets, eve, phase, winlen, dis, debug = True):
                         print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
     return st
 
+def factor1(n):
+    d = 2
+    factors = [ ]  #empty list
+    while n > 1:
+      if n % d == 0:
+        factors.append(d)
+        n = n/d
+      else:
+        d = d + 1
+    return factors
+
+
+def common_decimation(st, debug = True):
+    samplerates = list(set([tr.stats.sampling_rate for tr in st]))
+    if debug:
+        print(samplerates)
+    minsps = min(samplerates)
+    for samplerate in samplerates:
+        pfacs = factor1(samplerate)
+        if 'factors' not in vars():
+            factors = pfacs
+        else:
+            factors = [x for x in factors if x in pfacs]
+    samplerate = np.prod(factors)
+    if debug:
+        print(factors)
+    for tr in st:
+        if tr.stats.sampling_rate > samplerate:
+            if debug:
+                print('Need to decimate')
+            pfacs = factor1(int(tr.stats.sampling_rate))
+            for pfac not in factors:
+                tr.decimate(pfac)
+    return st
+
+
+
 
 
 ####################
@@ -81,7 +119,7 @@ debug = True
 plot = True
 
 # station --> command line argument
-net, staGOOD = 'N4', 'O52A'
+net, staGOOD = 'IU', 'CCM'
 
 client = Client("IRIS")
 
@@ -152,6 +190,9 @@ for i,eve in enumerate(cat):
     st.taper(0.05)
     st.remove_response()
     st.filter('bandpass',freqmin=fmin, freqmax=fmax)
+    st = common_decimation(st)
+    
+    
     # get trace for reference station
     trRef = st.select(station=staGOOD)
     print(trRef)
