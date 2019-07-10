@@ -66,43 +66,49 @@ def get_data(nets, eve, phase, winlen, dis, debug = True):
                         print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
     return st
 
-def factor1(n):
-    d = 2
-    factors = [ ]  #empty list
-    while n > 1:
-      if n % d == 0:
-        factors.append(d)
-        n = n/d
-      else:
-        d = d + 1
-    return factors
 
-
-def common_decimation(st, debug = True):
-    samplerates = list(set([tr.stats.sampling_rate for tr in st]))
-    if debug:
-        print(samplerates)
-    minsps = min(samplerates)
-    for samplerate in samplerates:
-        pfacs = factor1(samplerate)
-        if 'factors' not in vars():
-            factors = pfacs
-        else:
-            factors = [x for x in factors if x in pfacs]
-    samplerate = np.prod(factors)
-    if debug:
-        print(factors)
+def common_decimation(st):
+    # Need to do the prime factors, but it was having issues with the set differences
     for tr in st:
-        if tr.stats.sampling_rate > samplerate:
-            if debug:
-                print('Need to decimate')
-            pfacs = factor1(int(tr.stats.sampling_rate))
-            for pfac not in factors:
-                tr.decimate(pfac)
+        if tr.stats.sampling_rate == 100:
+            tr.decimate(5)
+        elif tr.stats.sampling_rate == 40:
+            tr.decimate(2)
+        elif tr.stats.sampling_rate == 200:
+            tr.decimate(2)
+            tr.decimate(5)
+            
     return st
 
 
+def remove_channels(st, debug = False):
+    # This removed redundant channels for a given location code
+    stGood = Stream()
+    stas = list(set([(tr.id)[:-4] for tr in st]))
+    if debug:
+        print(stas)
+    for sta in stas:
+        # We now have the unique pieces
+        net, sta, loc = sta.split('.')
+        st2 = st.select(station=sta, location=loc, network=net)
+        for tr in st2:
+            if 'trGood' not in vars():
+                trGood = tr
+            else:
+                if tr.stats.sampling_rate > trGood.stats.sampling_rate:
+                    trGood = tr
+        stGood += trGood
+        del trGood
+    return stGood
 
+def choptocommon(st):
+    """ A function to chop the data to a common time window. """
+    stime = max([tr.stats.starttime for tr in st])
+    etime = min([tr.stats.endtime for tr in st])
+    st.trim(starttime=stime, endtime=etime)
+    if debug:
+        print 'starttime: '+str(stime)+' endtime: '+str(etime)
+    return st
 
 
 ####################
@@ -130,7 +136,7 @@ etime = UTCDateTime('2019-150T00:00:00')
 # Need to correct channels for BH and HH at the stame time.  We also need to remove LH
 
 inv = client.get_stations(network=net, station=staGOOD,
-                            channel = 'HHZ', level="response",
+                            channel = '*HZ', level="response",
                             starttime=stime, endtime = etime)
 if debug:
     print(inv[0][0][0].code)
@@ -143,9 +149,9 @@ maxr = 1.5
 
 # get all stations that fall within +/- maxr of staGOOD
 try:
-    nets = client.get_stations(starttime=stime, endtime=etime, channel="HHZ",
+    nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
                 longitude=coors['longitude'], latitude=coors['latitude'],
-                maxradius = maxr, level="channel", network="N4")
+                maxradius = maxr, level="channel")
 except:
     sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
 
@@ -167,7 +173,7 @@ except:
 winlen = 50
 
 # describe phase --> command line argument
-phase = 'R'
+phase = 'P'
 
 # create file to store data if it does not exist
 if not os.path.isfile('raad_earthquakes.csv'):
@@ -190,8 +196,11 @@ for i,eve in enumerate(cat):
     st.taper(0.05)
     st.remove_response()
     st.filter('bandpass',freqmin=fmin, freqmax=fmax)
+    st = remove_channels(st)
+
     st = common_decimation(st)
-    
+    st = choptocommon(st)
+
     
     # get trace for reference station
     trRef = st.select(station=staGOOD)
@@ -200,7 +209,7 @@ for i,eve in enumerate(cat):
         trRef = trRef[0]
     except:
         continue
-    #fig = plt.figure(1, figsize=(8,8))
+    fig = plt.figure(1, figsize=(8,8))
     for tr in st:
         idx, val = xcorr(tr, trRef, 20)
         if debug:
@@ -218,23 +227,24 @@ for i,eve in enumerate(cat):
     stack /= float(len(st))
     idx, val = xcorr(trRef, stack, 20)
     # write results to csv for analysis
-    with open('raad_earthquakes.csv', mode='a') as file:
-        write = csv.writer(file, delimiter=',')
-        write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
-                eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
-                eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(site_dis/1000,2),
-                '({},{})'.format(fmin,fmax), phase, maxr, round(val,5)])
+    #with open('raad_earthquakes.csv', mode='a') as file:
+        #write = csv.writer(file, delimiter=',')
+        #write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
+                #eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
+                #eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(site_dis/1000,2),
+                #'({},{})'.format(fmin,fmax), phase, maxr, round(val,5)])
     amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
     amps.append(amp)
     times.append(float(idx)/100.)
     corrs.append(val)
     plt.plot(t, stack, color = 'C1', linewidth=3, label ='Stack')
     plt.xlim((min(t), max(t)))
-    plt.legend(loc='upper left')
+    plt.legend(loc=2)
     plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, fmin, fmax, eve['origins'][0]['time'], eve['magnitudes'][0]['mag']), format='png')
-    plt.close()
     if plot:
         plt.show()
+    plt.close()
+    
     del stack
 print(amps)
 print(times)
