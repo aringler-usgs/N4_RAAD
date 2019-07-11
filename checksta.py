@@ -9,8 +9,12 @@ import csv
 import sys
 import numpy as np
 import matplotlib as mpl
+
 from obspy.signal.cross_correlation import xcorr
 model = TauPyModel(model="iasp91")
+
+
+client = Client()
 
 
 mpl.rc('font',family='serif')
@@ -116,7 +120,7 @@ def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
         
-        paramdic['station_radius'] = 2.5
+        paramdic['station_radius'] = 1.5
         paramdic['min_radius'] = 30.
         paramdic['max_radius'] = 80.
         paramdic['min_mag'] = 6.
@@ -149,6 +153,138 @@ def get_parameters(phase):
     return paramdic
 
 
+def proc_sta(net, staGOOD, phase):
+
+    paramdic = get_parameters(phase)
+
+    stime = UTCDateTime('2017-001T00:00:00')
+    etime = UTCDateTime('2019-150T00:00:00')
+    
+
+    inv = client.get_stations(network=net, station=staGOOD,
+                            channel = '*HZ', level="response",
+                            starttime=stime, endtime = etime)
+
+    
+    if debug:
+        print(inv[0][0][0].code)
+    
+    # grab test station coordinates
+    coors = inv.get_coordinates(inv[0].code + '.' + inv[0][0].code + '.' + inv[0][0][0].location_code + '.' + inv[0][0][0].code)
+    
+    
+    # get all stations that fall within paramdic['station_radius'] of staGOOD
+    try:
+        nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
+                    longitude=coors['longitude'], latitude=coors['latitude'],
+                    maxradius = paramdic['station_radius'], level="channel")
+    except:
+        sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
+    
+    try:
+        cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], latitude=coors['latitude'], 
+                                longitude=coors['longitude'], maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
+    except:
+        sys.exit('No events available')
+    
+    if debug:
+        print(cat)
+    
+    
+    # create file to store data if it does not exist
+    if not os.path.isfile('raad_earthquakes.csv'):
+        with open('raad_earthquakes.csv', mode='w') as file:
+            writer = csv.writer(file, delimiter=',')
+            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag'])
+    
+    # for each event run the analysis
+    times, amps, corrs = [], [], []
+    for i,eve in enumerate(cat):
+        if debug:
+            print('In the main loop')
+        
+        # test station distance for window length of phase R
+        (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude, eve.origins[0].longitude)
+        # get data for each station for a given event (eve)
+        st = get_data(nets, eve, phase, paramdic['length'], dis, False)
+        print('Here we are')
+        if debug:
+            print(st)
+        st = remove_channels(st)
+        try:
+            st.remove_response()
+        except:
+            print('Bad metadata for:')
+            print(st)
+            
+        st = common_decimation(st)
+        print(st)
+        try:
+            st = choptocommon(st)
+        except:
+            continue
+        
+        # Now we have the data so lets cross-correlate and stack
+        #st.plot()
+        st.detrend('constant')
+        st.taper(0.05)
+        st.filter('bandpass',freqmin=paramdic['fmin'], freqmax=paramdic['fmax'])
+        
+        
+        # get trace for reference station
+        trRef = st.select(station=staGOOD)
+        print(trRef)
+        try:
+            trRef = trRef[0]
+        except:
+            continue
+        fig = plt.figure(1, figsize=(12,12))
+        for tr in st:
+            idx, val = xcorr(tr, trRef, 20)
+            if debug:
+                print(idx)
+                print(val)
+            if val < 0.8:
+                st.remove(tr)
+                continue
+            
+            t = np.arange(0, tr.stats.npts)/tr.stats.sampling_rate
+            plt.plot(t - float(idx)/float(tr.stats.sampling_rate), tr.data*10**6, label= tr.id + ' ' + str(round(val,5)))
+            plt.xlabel('Time (s)')
+            plt.ylabel('Velocity ($\mu$m/s)')
+            tr.stats.starttime -= float(idx)/tr.stats.sampling_rate
+            if 'stack' not in vars():
+                stack = tr.data
+            else:
+                stack += tr.data
+        stack /= float(len(st))
+        idx, val = xcorr(trRef, stack, 20)
+        # write results to csv for analysis
+        amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
+    
+        with open('raad_earthquakes.csv', mode='a') as file:
+            write = csv.writer(file, delimiter=',')
+            write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
+                    eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
+                    eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
+                    '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate)])
+        
+    
+        plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')
+        plt.xlim((min(t), max(t)))
+        plt.legend(loc=2)
+        strtime = str(eve['origins'][0]['time'].year) + ' '
+        strtime += str(eve['origins'][0]['time'].julday) + ' '
+        strtime += str(eve['origins'][0]['time'].hour).zfill(2) + ':' + str(eve['origins'][0]['time'].minute).zfill(2)
+        thand = strtime.replace(' ','_')
+        thand = thand.replace(':','_')
+        plt.title(phase + ' Comparison M' + str(eve['magnitudes'][0]['mag']) + ' ' + strtime)
+        plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, paramdic['fmin'], paramdic['fmax'], thand, eve['magnitudes'][0]['mag']), format='png')
+        plt.clf()
+        plt.close()
+        del stack
+    return
+
 
 
 
@@ -162,14 +298,6 @@ def get_parameters(phase):
 # describe phase --> command line argument
 phase = 'P'
 
-paramdic = get_parameters(phase)
-
-
-
-
-
-
-
 
 
 # extra info --> command line argument
@@ -179,132 +307,23 @@ debug = True
 plot = True
 
 # station --> command line argument
-net, staGOOD = 'IU', 'TUC'
-
-client = Client()
-
-# start and end times --> command line argument
-stime = UTCDateTime('2019-001T00:00:00')
-etime = UTCDateTime('2019-150T00:00:00')
 
 
-inv = client.get_stations(network=net, station=staGOOD,
-                            channel = '*HZ', level="response",
-                            starttime=stime, endtime = etime)
-if debug:
-    print(inv[0][0][0].code)
+net, staGOOD = 'IW', 'FXWY'
 
-# grab test station coordinates
-coors = inv.get_coordinates(inv[0].code + '.' + inv[0][0].code + '.' + inv[0][0][0].location_code + '.' + inv[0][0][0].code)
+stas = ['DLMT', 'FLWY', 'FXWY', 'IMW', 'LOHW', 'MFID', 'MOOW', 'PHWY', 'PLID', 'REDW', 'RRI2', 'RWWY', 'SMCO', 'SNOW', 'TPAW']
 
+def proc_net(sta):
+    proc_sta(net, sta, phase) 
 
-# get all stations that fall within paramdic['station_radius'] of staGOOD
-try:
-    nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
-                longitude=coors['longitude'], latitude=coors['latitude'],
-                maxradius = paramdic['station_radius'], level="channel")
-except:
-    sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
+net = sys.argv[1]
+sta = sys.argv[2]
 
-try:
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], latitude=coors['latitude'], 
-                            longitude=coors['longitude'], maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
-except:
-    sys.exit('No events available')
-
-if debug:
-    print(cat)
+proc_net(sta)
 
 
-
-# create file to store data if it does not exist
-if not os.path.isfile('raad_earthquakes.csv'):
-    with open('raad_earthquakes.csv', mode='w') as file:
-        writer = csv.writer(file, delimiter=',')
-        writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag'])
-
-# for each event run the analysis
-times, amps, corrs = [], [], []
-for i,eve in enumerate(cat):
-    if debug:
-        print('In the main loop')
-    
-    # test station distance for window length of phase R
-    (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude, eve.origins[0].longitude)
-    # get data for each station for a given event (eve)
-    st = get_data(nets, eve, phase, paramdic['length'], dis, True)
-    if debug:
-        print(st)
-    st = remove_channels(st)
-    st.remove_response()
-    st = common_decimation(st)
-    st = choptocommon(st)
-    # Now we have the data so lets cross-correlate and stack
-    #st.plot()
-    st.detrend('constant')
-    st.taper(0.05)
-    st.filter('bandpass',freqmin=paramdic['fmin'], freqmax=paramdic['fmax'])
-    
-
-
-    
-    # get trace for reference station
-    trRef = st.select(station=staGOOD)
-    print(trRef)
-    try:
-        trRef = trRef[0]
-    except:
-        continue
-    fig = plt.figure(1, figsize=(12,12))
-    for tr in st:
-        idx, val = xcorr(tr, trRef, 20)
-        if debug:
-            print(idx)
-            print(val)
-        if val < 0.8:
-            st.remove(tr)
-            continue
-        
-        t = np.arange(0, tr.stats.npts)/tr.stats.sampling_rate
-        plt.plot(t - float(idx)/float(tr.stats.sampling_rate), tr.data*10**6, label= tr.id + ' ' + str(round(val,5)))
-        plt.xlabel('Time (s)')
-        plt.ylabel('Velocity ($\mu$m/s)')
-        tr.stats.starttime -= float(idx)/tr.stats.sampling_rate
-        if 'stack' not in vars():
-            stack = tr.data
-        else:
-            stack += tr.data
-    stack /= float(len(st))
-    idx, val = xcorr(trRef, stack, 20)
-    # write results to csv for analysis
-    amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
-    amps.append(amp)
-    with open('raad_earthquakes.csv', mode='a') as file:
-        write = csv.writer(file, delimiter=',')
-        write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
-                eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
-                eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
-                '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate)])
-    
-    times.append(float(idx)/100.)
-    corrs.append(val)
-    plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')
-    plt.xlim((min(t), max(t)))
-    plt.legend(loc=2)
-    strtime = str(eve['origins'][0]['time'].year) + ' '
-    strtime += str(eve['origins'][0]['time'].julday) + ' '
-    strtime += str(eve['origins'][0]['time'].hour).zfill(2) + ':' + str(eve['origins'][0]['time'].minute).zfill(2)
-    plt.title(phase + ' Comparison M' + str(eve['magnitudes'][0]['mag']) + ' ' + strtime)
-    plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, paramdic['fmin'], paramdic['fmax'], eve['origins'][0]['time'], eve['magnitudes'][0]['mag']), format='png')
-    if plot:
-        plt.show()
-    plt.close()
-    del stack
-    
-    
-    
-    
-    
-print(amps)
-print(times)
-print(corrs)
+#from multiprocessing import Pool
+#for sta in stas:
+#    proc_net(sta)
+#pool = Pool(14)
+#pool.map(proc_net, stas)
