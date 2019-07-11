@@ -13,15 +13,14 @@ from obspy.signal.cross_correlation import xcorr
 model = TauPyModel(model="iasp91")
 
 
-#mpl.rc('font',family='serif')
-#mpl.rc('font',serif='Times') 
-#mpl.rc('text', usetex=True)
-#mpl.rc('font',size=14)
+mpl.rc('font',family='serif')
+mpl.rc('font',serif='Times') 
+mpl.rc('text', usetex=True)
+mpl.rc('font',size=16)
 
 #added site_dis as an argument since for R phase, winlens were varied, made dependent on only the reference site.
 # make winlen and site_dis not required 
 def get_data(nets, eve, phase, winlen, dis, debug = True):
-    dis =  dis/1000
     st = Stream()
     for net in nets:
         for sta in net:
@@ -46,14 +45,16 @@ def get_data(nets, eve, phase, winlen, dis, debug = True):
                         pstime = (eve.origins[0].time + arrivtime)
                         petime = (eve.origins[0].time + winlen)
                     else:
-                        dis = kilometer2degrees(dis/1000.)
-                        arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=dis, phase_list=[phase])
+                        disdeg = kilometer2degrees(dis/1000.)
+                        if debug:
+                            print('Here is the distance')
+                        arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000., distance_in_degree=disdeg, phase_list=[phase])
                         if debug:
                             print(arrivals)
                         for arrival in arrivals:
                             # do we need to use P-S time to decide window length
                             # winlen = 50.
-                            pstime = (eve.origins[0].time + arrival.time)-5.
+                            pstime = (eve.origins[0].time + arrival.time)-10.
                             petime = pstime + winlen
                     if debug:
                         print(net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
@@ -111,11 +112,64 @@ def choptocommon(st):
     return st
 
 
+def get_parameters(phase):
+    paramdic = {}
+    if phase == 'P':
+        
+        paramdic['station_radius'] = 2.5
+        paramdic['min_radius'] = 30.
+        paramdic['max_radius'] = 80.
+        paramdic['min_mag'] = 6.
+        paramdic['max_mag'] = 8.5
+        paramdic['length'] = 50
+        paramdic['fmin'] = 1./20.
+        paramdic['fmax'] =1./5.
+    elif phase == 'Rayleigh':
+        paramdic['station_radius'] = 1.5
+        paramdic['min_radius'] = 30.
+        paramdic['max_radius'] = 80.
+        paramdic['min_mag'] = 6.
+        paramdic['max_mag'] = 8.5
+        paramdic['length'] = 50
+        paramdic['fmin'] = 0.1
+        paramdic['fmax'] =1.
+    elif  phase == 'S':
+        paramdic['station_radius'] = 1.5
+        paramdic['min_radius'] = 30.
+        paramdic['max_radius'] = 80.
+        paramdic['min_mag'] = 6.
+        paramdic['max_mag'] = 8.5
+        paramdic['length'] = 50
+        paramdic['fmin'] = 0.1
+        paramdic['fmax'] =1.
+    else:
+        pass
+    
+    
+    return paramdic
+
+
+
+
+
+
 ####################
 # 1. What are the best frequencies bands for P, S, and Raleigh Waves?
 # 2. What are the best parameters for earthquakes for P, S, and Raleigh (e.g depth restrictions, st-eq distance)
 # 3. Test maxr (st-st radius) to see where program breaks down for P, S, Raleigh?
 ###################
+
+# describe phase --> command line argument
+phase = 'P'
+
+paramdic = get_parameters(phase)
+
+
+
+
+
+
+
 
 
 # extra info --> command line argument
@@ -125,15 +179,14 @@ debug = True
 plot = True
 
 # station --> command line argument
-net, staGOOD = 'IU', 'CCM'
+net, staGOOD = 'IU', 'TUC'
 
-client = Client("IRIS")
+client = Client()
 
 # start and end times --> command line argument
 stime = UTCDateTime('2019-001T00:00:00')
 etime = UTCDateTime('2019-150T00:00:00')
 
-# Need to correct channels for BH and HH at the stame time.  We also need to remove LH
 
 inv = client.get_stations(network=net, station=staGOOD,
                             channel = '*HZ', level="response",
@@ -144,62 +197,55 @@ if debug:
 # grab test station coordinates
 coors = inv.get_coordinates(inv[0].code + '.' + inv[0][0].code + '.' + inv[0][0][0].location_code + '.' + inv[0][0][0].code)
 
-# max station-station degree distance
-maxr = 1.5
 
-# get all stations that fall within +/- maxr of staGOOD
+# get all stations that fall within paramdic['station_radius'] of staGOOD
 try:
     nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
                 longitude=coors['longitude'], latitude=coors['latitude'],
-                maxradius = maxr, level="channel")
+                maxradius = paramdic['station_radius'], level="channel")
 except:
     sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
 
-if debug:
-    print(nets) 
-
-# We will want to play with this to figure out the correct events for the phase of interest
-
-# We should pick our event parameters for the correct phase e.g. shallow for rayleigh
 try:
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=6.0, maxmagnitude=7.5, latitude=coors['latitude'], 
-                            longitude=coors['longitude'], maxradius=85., minradius = 30.)
+    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], latitude=coors['latitude'], 
+                            longitude=coors['longitude'], maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
 except:
     sys.exit('No events available')
 
-# describe frequency band --> command line argument
-[fmin, fmax] = [0.01, 0.1]
-#winlen = 1./fmin * 2
-winlen = 50
+if debug:
+    print(cat)
 
-# describe phase --> command line argument
-phase = 'P'
+
 
 # create file to store data if it does not exist
 if not os.path.isfile('raad_earthquakes.csv'):
     with open('raad_earthquakes.csv', mode='w') as file:
         writer = csv.writer(file, delimiter=',')
-        writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr'])
+        writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag'])
 
 # for each event run the analysis
 times, amps, corrs = [], [], []
 for i,eve in enumerate(cat):
+    if debug:
+        print('In the main loop')
+    
     # test station distance for window length of phase R
     (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude, eve.origins[0].longitude)
     # get data for each station for a given event (eve)
-    st = get_data(nets, eve, phase, winlen, dis, True)
+    st = get_data(nets, eve, phase, paramdic['length'], dis, True)
     if debug:
         print(st)
+    st = remove_channels(st)
+    st.remove_response()
+    st = common_decimation(st)
+    st = choptocommon(st)
     # Now we have the data so lets cross-correlate and stack
     #st.plot()
     st.detrend('constant')
     st.taper(0.05)
-    st.remove_response()
-    st.filter('bandpass',freqmin=fmin, freqmax=fmax)
-    st = remove_channels(st)
+    st.filter('bandpass',freqmin=paramdic['fmin'], freqmax=paramdic['fmax'])
+    
 
-    st = common_decimation(st)
-    st = choptocommon(st)
 
     
     # get trace for reference station
@@ -209,17 +255,21 @@ for i,eve in enumerate(cat):
         trRef = trRef[0]
     except:
         continue
-    fig = plt.figure(1, figsize=(8,8))
+    fig = plt.figure(1, figsize=(12,12))
     for tr in st:
         idx, val = xcorr(tr, trRef, 20)
         if debug:
             print(idx)
             print(val)
+        if val < 0.8:
+            st.remove(tr)
+            continue
+        
         t = np.arange(0, tr.stats.npts)/tr.stats.sampling_rate
-        plt.plot(t - float(idx)/40., tr.data, label= tr.id + ' ' + str(val))
+        plt.plot(t - float(idx)/float(tr.stats.sampling_rate), tr.data*10**6, label= tr.id + ' ' + str(round(val,5)))
         plt.xlabel('Time (s)')
-        plt.ylabel('Velocity (m/s)')
-        tr.stats.starttime -= float(idx)/100.
+        plt.ylabel('Velocity ($\mu$m/s)')
+        tr.stats.starttime -= float(idx)/tr.stats.sampling_rate
         if 'stack' not in vars():
             stack = tr.data
         else:
@@ -227,25 +277,34 @@ for i,eve in enumerate(cat):
     stack /= float(len(st))
     idx, val = xcorr(trRef, stack, 20)
     # write results to csv for analysis
-    #with open('raad_earthquakes.csv', mode='a') as file:
-        #write = csv.writer(file, delimiter=',')
-        #write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
-                #eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
-                #eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(site_dis/1000,2),
-                #'({},{})'.format(fmin,fmax), phase, maxr, round(val,5)])
     amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
     amps.append(amp)
+    with open('raad_earthquakes.csv', mode='a') as file:
+        write = csv.writer(file, delimiter=',')
+        write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
+                eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
+                eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
+                '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate)])
+    
     times.append(float(idx)/100.)
     corrs.append(val)
-    plt.plot(t, stack, color = 'C1', linewidth=3, label ='Stack')
+    plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')
     plt.xlim((min(t), max(t)))
     plt.legend(loc=2)
-    plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, fmin, fmax, eve['origins'][0]['time'], eve['magnitudes'][0]['mag']), format='png')
+    strtime = str(eve['origins'][0]['time'].year) + ' '
+    strtime += str(eve['origins'][0]['time'].julday) + ' '
+    strtime += str(eve['origins'][0]['time'].hour).zfill(2) + ':' + str(eve['origins'][0]['time'].minute).zfill(2)
+    plt.title(phase + ' Comparison M' + str(eve['magnitudes'][0]['mag']) + ' ' + strtime)
+    plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, paramdic['fmin'], paramdic['fmax'], eve['origins'][0]['time'], eve['magnitudes'][0]['mag']), format='png')
     if plot:
         plt.show()
     plt.close()
-    
     del stack
+    
+    
+    
+    
+    
 print(amps)
 print(times)
 print(corrs)
