@@ -158,6 +158,7 @@ def proc_sta(net, staGOOD, phase):
     paramdic = get_parameters(phase)
 
     stime = UTCDateTime('2017-001T00:00:00')
+    #stime = UTCDateTime('2019-130T00:00:00')
     etime = UTCDateTime('2019-150T00:00:00')
     
 
@@ -177,7 +178,7 @@ def proc_sta(net, staGOOD, phase):
     try:
         nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
                     longitude=coors['longitude'], latitude=coors['latitude'],
-                    maxradius = paramdic['station_radius'], level="channel")
+                    maxradius = paramdic['station_radius'], level="channel", network="IU,II,NE,IW,N4,GS,CU")
     except:
         sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
     
@@ -193,9 +194,9 @@ def proc_sta(net, staGOOD, phase):
     
     # create file to store data if it does not exist
     if not os.path.isfile('raad_earthquakes.csv'):
-        with open('raad_earthquakes.csv', mode='w') as file:
+        with open(staGOOD + '_raad_earthquakes.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',')
-            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag'])
+            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag', 'NumStas'])
     
     # for each event run the analysis
     times, amps, corrs = [], [], []
@@ -261,13 +262,16 @@ def proc_sta(net, staGOOD, phase):
         idx, val = xcorr(trRef, stack, 20)
         # write results to csv for analysis
         amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
-    
-        with open('raad_earthquakes.csv', mode='a') as file:
+        if len(st) <= 1:
+            # Not enough data
+            continue
+            
+        with open(staGOOD + '_raad_earthquakes.csv', mode='a') as file:
             write = csv.writer(file, delimiter=',')
             write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
                     eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
                     eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
-                    '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate)])
+                    '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate), len(st)])
         
     
         plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')
