@@ -158,8 +158,9 @@ def proc_sta(net, staGOOD, phase):
     paramdic = get_parameters(phase)
 
     stime = UTCDateTime('2017-001T00:00:00')
-    #stime = UTCDateTime('2019-130T00:00:00')
-    etime = UTCDateTime('2019-150T00:00:00')
+    #stime = UTCDateTime('2018-285T00:00:00')
+    etime = UTCDateTime('2019-130T00:00:00')
+    #etime = UTCDateTime('2018-307T00:00:00')
     
 
     inv = client.get_stations(network=net, station=staGOOD,
@@ -193,8 +194,8 @@ def proc_sta(net, staGOOD, phase):
     
     
     # create file to store data if it does not exist
-    if not os.path.isfile('raad_earthquakes.csv'):
-        with open(staGOOD + '_raad_earthquakes.csv', mode='w') as file:
+    if not os.path.isfile(net + '_' + staGOOD + '_raad_earthquakes.csv'):
+        with open(net + '_' + staGOOD + '_raad_earthquakes.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',')
             writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag', 'NumStas'])
     
@@ -258,15 +259,20 @@ def proc_sta(net, staGOOD, phase):
                 stack = tr.data
             else:
                 stack += tr.data
+        print('Here is the final stack of traces:')
+        print(st)
         stack /= float(len(st))
         idx, val = xcorr(trRef, stack, 20)
         # write results to csv for analysis
         amp = np.sqrt(np.sum(trRef.data**2)/np.sum(stack**2))
         if len(st) <= 1:
             # Not enough data
+            plt.clf()
+            plt.close()
+            del stack
             continue
             
-        with open(staGOOD + '_raad_earthquakes.csv', mode='a') as file:
+        with open(net + '_' + staGOOD + '_raad_earthquakes.csv', mode='a') as file:
             write = csv.writer(file, delimiter=',')
             write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
                     eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
@@ -283,7 +289,8 @@ def proc_sta(net, staGOOD, phase):
         thand = strtime.replace(' ','_')
         thand = thand.replace(':','_')
         plt.title(phase + ' Comparison M' + str(eve['magnitudes'][0]['mag']) + ' ' + strtime)
-        plt.savefig('RAAD_{}_{}_{}_{}_{}.png'.format(staGOOD, paramdic['fmin'], paramdic['fmax'], thand, eve['magnitudes'][0]['mag']), format='png')
+        plt.savefig('RAAD_{}_{}_{}_{}_{}_{}.png'.format(net, staGOOD, paramdic['fmin'], paramdic['fmax'], thand, eve['magnitudes'][0]['mag']), format='png')
+        plt.show()
         plt.clf()
         plt.close()
         del stack
@@ -302,8 +309,6 @@ def proc_sta(net, staGOOD, phase):
 # describe phase --> command line argument
 phase = 'P'
 
-
-
 # extra info --> command line argument
 debug = True
 
@@ -311,11 +316,6 @@ debug = True
 plot = True
 
 # station --> command line argument
-
-
-net, staGOOD = 'IW', 'FXWY'
-
-stas = ['DLMT', 'FLWY', 'FXWY', 'IMW', 'LOHW', 'MFID', 'MOOW', 'PHWY', 'PLID', 'REDW', 'RRI2', 'RWWY', 'SMCO', 'SNOW', 'TPAW']
 
 def proc_net(sta):
     proc_sta(net, sta, phase) 
@@ -326,8 +326,3 @@ sta = sys.argv[2]
 proc_net(sta)
 
 
-#from multiprocessing import Pool
-#for sta in stas:
-#    proc_net(sta)
-#pool = Pool(14)
-#pool.map(proc_net, stas)
