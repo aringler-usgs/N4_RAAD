@@ -120,7 +120,7 @@ def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
         
-        paramdic['station_radius'] = 1.5
+        paramdic['station_radius'] = 2.0
         paramdic['min_radius'] = 30.
         paramdic['max_radius'] = 80.
         paramdic['min_mag'] = 6.
@@ -290,7 +290,7 @@ def proc_sta(net, staGOOD, phase):
         thand = thand.replace(':','_')
         plt.title(phase + ' Comparison M' + str(eve['magnitudes'][0]['mag']) + ' ' + strtime)
         plt.savefig('RAAD_{}_{}_{}_{}_{}_{}.png'.format(net, staGOOD, paramdic['fmin'], paramdic['fmax'], thand, eve['magnitudes'][0]['mag']), format='png')
-        plt.show()
+        #plt.show()
         plt.clf()
         plt.close()
         del stack

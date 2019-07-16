@@ -5,7 +5,7 @@ from multiprocessing import Pool
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
 
-net = 'N4'
+net = 'NE'
 
 
 def runcheck(sta):
@@ -15,7 +15,7 @@ client = Client()
 stime = UTCDateTime('2019-196T00:00:00')
 etime = UTCDateTime('2019-196T00:01:00')
 
-inv = client.get_stations(network="N4", station="*",
+inv = client.get_stations(network=net, station="*",
                             channel = '*',location = '*', level="response",
                             starttime=stime, endtime = etime)
 stas = []
