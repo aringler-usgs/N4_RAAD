@@ -197,7 +197,7 @@ def proc_sta(net, staGOOD, phase):
     if not os.path.isfile(net + '_' + staGOOD + '_raad_earthquakes.csv'):
         with open(net + '_' + staGOOD + '_raad_earthquakes.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',')
-            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag', 'NumStas'])
+            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency1', 'Frequency2', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag', 'NumStas'])
     
     # for each event run the analysis
     times, amps, corrs = [], [], []
@@ -277,7 +277,7 @@ def proc_sta(net, staGOOD, phase):
             write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
                     eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
                     eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
-                    '({},{})'.format(paramdic['fmin'], paramdic['fmax']), phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate), len(st)])
+                    paramdic['fmin'], paramdic['fmax'], phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate), len(st)])
         
     
         plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')
