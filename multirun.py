@@ -5,14 +5,14 @@ from multiprocessing import Pool
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
 
-net = 'NE'
+net = 'LD'
 
 
 def runcheck(sta):
     os.system('python checksta.py ' + net + ' ' + sta)
     
 client = Client()
-stime = UTCDateTime('2019-196T00:00:00')
+stime = UTCDateTime('2017-001T00:00:00')
 etime = UTCDateTime('2019-196T00:01:00')
 
 inv = client.get_stations(network=net, station="*",
@@ -27,5 +27,5 @@ print(stas)
 stas = list(set(stas))
 #stas = ['DLMT', 'FLWY', 'FXWY', 'IMW', 'LOHW', 'MFID', 'MOOW', 'PHWY', 'PLID', 'REDW', 'RRI2', 'RWWY', 'SMCO', 'SNOW', 'TPAW']
 print(stas)
-pool = Pool(10)
+pool = Pool(20)
 pool.map(runcheck, stas)

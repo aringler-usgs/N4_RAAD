@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib as mpl
 
 from obspy.signal.cross_correlation import xcorr
-model = TauPyModel(model="iasp91")
+
 
 
 client = Client()
@@ -67,8 +67,9 @@ def get_data(nets, eve, phase, winlen, dis, debug = True):
                     try:
                     #if True:
                         st += client.get_waveforms(net.code, sta.code, chan.location_code, chan.code, pstime, petime, attach_response = True)
+                    
                     except:
-                        print('No data for: ' + net.code + '.' + sta.code + chan.location_code + '.' + chan.code)
+                        print('No data for: ' + net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code)
     return st
 
 
@@ -179,7 +180,7 @@ def proc_sta(net, staGOOD, phase):
     try:
         nets = client.get_stations(starttime=stime, endtime=etime, channel="*HZ",
                     longitude=coors['longitude'], latitude=coors['latitude'],
-                    maxradius = paramdic['station_radius'], level="channel", network="IU,II,NE,IW,N4,GS,CU")
+                    maxradius = paramdic['station_radius'], level="channel", network="IU,II,NE,IW,N4,GS,CU,US")
     except:
         sys.exit('No stations nearby {}_{}'.format(net, staGOOD))
     
@@ -197,7 +198,7 @@ def proc_sta(net, staGOOD, phase):
     if not os.path.isfile(net + '_' + staGOOD + '_raad_earthquakes.csv'):
         with open(net + '_' + staGOOD + '_raad_earthquakes.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',')
-            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency1', 'Frequency2', 'Phase', 'St-St Deg', 'Xcorr', 'Amplitude', 'Lag', 'NumStas'])
+            writer.writerow(['Time', 'Longitude', 'Latitude', 'Depth', 'Magnitude', 'Station', 'Distance', 'Frequency1', 'Frequency2', 'Phase', 'Xcorr', 'Amplitude', 'Lag', 'NumStas', 'St-St Azi', 'St-St Dis'])
     
     # for each event run the analysis
     times, amps, corrs = [], [], []
@@ -208,7 +209,7 @@ def proc_sta(net, staGOOD, phase):
         # test station distance for window length of phase R
         (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], eve.origins[0].latitude, eve.origins[0].longitude)
         # get data for each station for a given event (eve)
-        st = get_data(nets, eve, phase, paramdic['length'], dis, False)
+        st = get_data(nets, eve, phase, paramdic['length'], dis, True)
         print('Here we are')
         if debug:
             print(st)
@@ -238,9 +239,11 @@ def proc_sta(net, staGOOD, phase):
         print(trRef)
         try:
             trRef = trRef[0]
+            coors_Ref =nets.get_coordinates(trRef.id, trRef.stats.starttime)
         except:
             continue
         fig = plt.figure(1, figsize=(12,12))
+        mean_dis = 0.
         for tr in st:
             idx, val = xcorr(tr, trRef, 20)
             if debug:
@@ -259,8 +262,13 @@ def proc_sta(net, staGOOD, phase):
                 stack = tr.data
             else:
                 stack += tr.data
+            coors = nets.get_coordinates(tr.id,tr.stats.starttime)
+            (disSt,aziSt, baziSt) = gps2dist_azimuth(coors['latitude'], coors['longitude'], coors_Ref['latitude'], coors_Ref['longitude'])
+            disDeg = kilometer2degrees(disSt/1000.)
+            mean_dis += disDeg
         print('Here is the final stack of traces:')
-        print(st)
+            # Calculate the mean distance
+        mean_dis /= float(len(st))
         stack /= float(len(st))
         idx, val = xcorr(trRef, stack, 20)
         # write results to csv for analysis
@@ -271,13 +279,13 @@ def proc_sta(net, staGOOD, phase):
             plt.close()
             del stack
             continue
-            
+        # paramdic['station_radius'] is wrong
         with open(net + '_' + staGOOD + '_raad_earthquakes.csv', mode='a') as file:
             write = csv.writer(file, delimiter=',')
             write.writerow([eve['origins'][0]['time'],eve['origins'][0]['longitude'],
                     eve['origins'][0]['latitude'], float(eve['origins'][0]['depth'])/1000,
-                    eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(dis/1000,2),
-                    paramdic['fmin'], paramdic['fmax'], phase, paramdic['station_radius'], round(val,5), amp, float(idx)/float(tr.stats.sampling_rate), len(st)])
+                    eve['magnitudes'][0]['mag'], '{}_{}'.format(net,staGOOD), round(kilometer2degrees(dis/1000.),2),
+                    paramdic['fmin'], paramdic['fmax'], phase, round(val,5), amp, float(idx)/float(tr.stats.sampling_rate), len(st), mean_dis, baziSt])
         
     
         plt.plot(t, stack*10**6, color = 'C1', linewidth=3, label ='Stack')

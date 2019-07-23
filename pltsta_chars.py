@@ -56,8 +56,8 @@ for curfile in files:
 for item in dic_all:
     print(item)
 
-item1 = 'Amplitude'
-item2 = 'Xcorr'
+item1 = 'St-St Azi'
+item2 = 'Amplitude'
 fig = plt.figure(1,figsize=(9,9))
 plt.plot(dic_all[item1], dic_all[item2], '.')
 plt.xlabel(item1)
