@@ -15,6 +15,7 @@ mpl.rc('font',serif='Times')
 mpl.rc('text', usetex=True)
 mpl.rc('font',size=16)
 
+UTCDateTime.DEFAULT_PRECISION = 1
 
 def mean_coors(inv):
     lons, lats = [], []
@@ -27,14 +28,13 @@ def mean_coors(inv):
 def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
-        
         paramdic['station_radius'] = 2.0
-        paramdic['min_radius'] = 30.
-        paramdic['max_radius'] = 80.
-        paramdic['min_mag'] = 6.
-        paramdic['max_mag'] = 8.5
-        paramdic['length'] = 50
-        paramdic['fmin'] = 1./20.
+        paramdic['min_radius'] = 2.
+        paramdic['max_radius'] = 60.
+        paramdic['min_mag'] = 5.0
+        paramdic['max_mag'] = 8.0
+        paramdic['length'] = 60
+        paramdic['fmin'] = 1./15.
         paramdic['fmax'] = 1./5.
         paramdic['phase'] = 'P'
         paramdic['winlength'] = 50.
@@ -76,7 +76,7 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
                                                   distance_in_degree=disdeg, phase_list=paramdic['phase'])
                 if len(arrivals) == 0:
                     break
-                pstime = (eve.origins[0].time + arrivals[0].time)-10.
+                pstime = (eve.origins[0].time + arrivals[0].time)-20.
                 petime = pstime + paramdic['winlength']
                 try:
                     st += client.get_waveforms(net.code, sta.code, chan.location_code, 
@@ -86,12 +86,33 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
                 except:
                     print('No data for: ' + sncl)
                     bad_stas.append(sncl)
+    #st = choptocommon(st)
     return st, bad_stas
+
+def choptocommon(st):
+    """ A function to chop the data to a common time window. """
+    st2 = st.copy()
+    stime = max([tr.stats.starttime for tr in st])
+    etime = min([tr.stats.endtime for tr in st])
+    st2.trim(starttime=stime, endtime=etime)
+    if debug:
+        print 'starttime: '+str(stime)+' endtime: '+str(etime)
+    return st2
+
 
 def proc_data(st, inv, paramdic, eve):
     for tr in st:
         if tr.stats.sampling_rate <= 1.:
             st.remove(tr)
+        if tr.stats.sampling_rate == 200:
+            tr.decimate(5)
+            tr.decimate(2)
+            tr.decimate(2)
+        if tr.stats.sampling_rate == 40:
+            tr.decimate(4)
+        if tr.stats.sampling_rate == 100:
+            tr.decimate(2)
+            tr.decimate(5)    
     st.detrend('linear')
     st.detrend('constant')
     st.remove_response(inventory=inv, output='VEL')
@@ -103,12 +124,20 @@ def proc_data(st, inv, paramdic, eve):
         tr.stats.back_azimuth = bazi
     st.rotate('->ZNE', inventory=inv)
     st.rotate('NE->RT', inventory=inv)
+    
+    st.trim(st[0].stats.starttime+20., st[0].stats.endtime, pad=True, fill_value=0.)
+    st.taper(0.05)
+    newlen = min([tr.stats.npts for tr in st])
+    for tr in st:
+        tr.data[:newlen]
+
     return st
 
 
 
 def comp_stack(st, comp):
     st2 = st.select(component=comp)
+    print(st2)
     comb = combinations(range(len(st2)),2)
     used, not_used = [], []
     results = {}
@@ -117,6 +146,8 @@ def comp_stack(st, comp):
         tr2 = st2[ele[1]].copy()
         cc = correlate(tr1.data, tr2.data, 20)
         shift, value = xcorr_max(cc)
+        print(shift)
+        print(value)
         if value <= 0.8:
             continue
         tr2.stats.starttime -= float(shift)/tr2.stats.sampling_rate
@@ -139,6 +170,8 @@ def comp_stack(st, comp):
     
 def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     st2 = st.select(component=comp)
+    st2 = st2.copy()
+    
     diss = []
     # compute distances
     for tr in st2:
@@ -150,9 +183,28 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     print(diss)
     mdiss = min(diss)
     Mdiss = max(diss)
+    
+    # super nearby stations
+    if Mdiss - mdiss < 2:
+        smallplot = True
+        diss = np.arange(float(len(st2)))
+        for tr in st2:
+            tr.data /= np.max(np.abs(stack))
+        stack /= np.max(np.abs(stack))
+        
+    else:
+        smallplot = False
+                
+    
     ptp = np.ptp(stack)
+    
+    print(diss)
     ran = 0.3*(Mdiss-mdiss)*ptp
-    fig = plt.figure(1,figsize=(12,12))
+    if smallplot:
+        ran = 1.
+    
+    diss /= ran
+    fig = plt.figure(1,figsize=(16,12))
     tithand = st[0].stats.network + ' ' + paramdic['phase'] + '-Wave ' 
     if comp == 'R':
         tithand += ' Radial '
@@ -170,20 +222,34 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     gmax, gmin = -100., 500.
     tithand += ' $' + magstr + '$=' + str(mag)
     plt.title(tithand)
+    labs = []
     for pair in zip(diss, st2):
+        labs.append((pair[1].id).replace('.',' '))
         t = pair[1].times()
         if max(pair[1].data/ran + pair[0]) > gmax:
             gmax = max(pair[1].data/ran + pair[0])
         if min(pair[1].data/ran + pair[0]) <  gmin:
             gmin = min(pair[1].data/ran + pair[0])
-        p = plt.plot(t, pair[1].data/ran + pair[0])
-        plt.text(min(t)+1., pair[0]-+.2, (pair[1].id)[:-4].replace('.',' '), color=p[0].get_color())
+        if pair[1].max() > np.max(np.abs(stack))*3.:
+            p = plt.plot(t, (pair[1].data)/(np.max(np.abs(stack))*3.) + pair[0])
+            plt.text(min(t)+1., pair[0]+.2, (pair[1].id)[:-4].replace('.',' ') + ' gain', color=p[0].get_color())
+        else:
+            p = plt.plot(t, pair[1].data/ran + pair[0])
+            plt.text(min(t)+1., pair[0]-+.2, (pair[1].id)[:-4].replace('.',' '), color=p[0].get_color())
+
         plt.plot(t, stack/ran + pair[0], color='k', alpha=0.5, linewidth=3)
-    plt.plot([10., 10.], [0., 2*Mdiss+ ran], color='k', linewidth=3)
+    if smallplot:
+        plt.yticks(diss, labs)
+    plt.plot([10., 10.], [-1000., 1000.], color='k', linewidth=3)
     plt.ylim((gmin - 0.02*gmin, gmax + 0.02*gmax))
+    if smallplot:
+        plt.ylim((min(diss)-1,max(diss)+1))
     plt.xlim((min(t),max(t)))
     plt.xlabel('Time (s)')
-    plt.ylabel('Distance (deg)')
+    if smallplot:
+        plt.ylabel('Station index')
+    else:
+        plt.ylabel('Distance (deg)')
     plt.savefig(st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
                 str(eve['origins'][0]['time'].julday) + '_' +  str(eve['origins'][0]['time'].hour).zfill(2) +
                 str(eve['origins'][0]['time'].minute).zfill(2) + '.png', format='PNG', dpi=400)
@@ -195,7 +261,6 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     
 def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
     st2 = st.select(component=comp)
-
     # we will make a csv file with the infor for each channel for the event
     filehand = 'Results_' + st2[0].stats.network + '_' + comp + '_' + paramdic['phase'] + \
                 '_' + str(eve['origins'][0]['time'].year) + \
@@ -229,49 +294,14 @@ def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
             f.write('Good, ' )
         tr2 = tr.copy()
         tr2.trim(tr2.stats.starttime, tr2.stats.starttime+5.)
-        f.write(str(np.ptp(tr.data)))
-        f.write(str(np.ptp(tr2.data)/np.ptp(tr.data)) + '\n')
+        f.write(str(np.ptp(tr.data)) + ', ')
+        f.write(str(np.ptp(tr.data)/np.ptp(tr2.data)) + '\n')
     f.close()
 
     return
     
     
-def proc_net(net):  
-    model = TauPyModel(model="iasp91")
-    client = Client()  
-    stime = UTCDateTime('2017-001T00:00:00')
-    etime = UTCDateTime('2019-150T00:00:00')
-    #etime = stime + 5.*24*60.*60
-    inv = client.get_stations(starttime=stime, endtime=etime, 
-                          channel="*H*", network=net, level="response")
-    
-    mlon, mlat = mean_coors(inv)
-    # We want to eventually scrub the inventory
 
-    paramdic = get_parameters('P')
-
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
-                        latitude=mlat, longitude=mlon, maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
-
-    for idx, eve in enumerate(cat):
-        print('On event: ' + str(idx+1) + ' of  ' + str(len(cat)))
-        # Make a flat file with the important info
-        
-        # Get the data 
-        st, bad_stas = get_data(inv, eve, paramdic, model, client)
-        st = proc_data(st, inv, paramdic, eve)
-        for comp in ['Z', 'R']:
-            stack, not_used = comp_stack(st, comp)
-            if len(stack) == 0:
-                print('Bad event')
-                continue
-                
-            # We have a pretty plot showing all of the components
-            pretty_plot(st, stack, eve, not_used, comp, inv, paramdic)
-            
-            write_event_results(st, stack, eve, not_used, comp, inv, paramdic)
-    
-    return
         
 
     
