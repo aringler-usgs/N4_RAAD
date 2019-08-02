@@ -29,13 +29,13 @@ def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
         paramdic['station_radius'] = 2.0
-        paramdic['min_radius'] = 2.
-        paramdic['max_radius'] = 60.
-        paramdic['min_mag'] = 5.0
+        paramdic['min_radius'] = 20.
+        paramdic['max_radius'] = 80.
+        paramdic['min_mag'] = 4.0
         paramdic['max_mag'] = 8.0
         paramdic['length'] = 60
-        paramdic['fmin'] = 1./15.
-        paramdic['fmax'] = 1./5.
+        paramdic['fmin'] = 1./10.
+        paramdic['fmax'] = 1./2.
         paramdic['phase'] = 'P'
         paramdic['winlength'] = 50.
     elif phase == 'Rayleigh':
@@ -269,7 +269,7 @@ def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
                 str(eve['origins'][0]['time'].minute).zfill(2) + '.csv'
     
     f = open(filehand,'w')
-    f.write('ID, dis, depth, mag, amp, shift, corr, used, ptp, snr \n')
+    f.write('ID, dis, azimuth, depth, mag, amp, shift, corr, used, ptp, snr \n')
     
     for idx, tr in enumerate(st2):
         f.write(tr.id + ', ')
@@ -280,6 +280,7 @@ def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
                                             eve.origins[0].latitude, eve.origins[0].longitude)
         disdeg = kilometer2degrees(dis/1000.)
         f.write(str(disdeg) + ', ')
+        f.write(str(azi) + ', ')
         f.write(str(float(eve['origins'][0]['depth'])/1000) + ', ')
         f.write(str(eve.magnitudes[0].mag) + ', ')
         amp = np.sqrt(np.sum(tr.data**2)/np.sum(stack**2))

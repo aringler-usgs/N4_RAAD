@@ -8,14 +8,14 @@ import utils
 
     
 debug = True
-net ="GS"
+net ="IW"
 model = TauPyModel(model="iasp91")
 client = Client()  
-stime = UTCDateTime('2019-188T00:00:00')
+stime = UTCDateTime('2018-204T00:00:00')
 etime = UTCDateTime('2019-204T00:00:00')
 #etime = stime + 5.*24*60.*60
-inv = client.get_stations(starttime=stime, endtime=etime, station="CA*",
-                          channel="HH*", network=net, level="response")
+inv = client.get_stations(starttime=stime, endtime=etime, station="*",
+                          channel="*H*", network=net, level="response")
     
 mlon, mlat = utils.mean_coors(inv)
 # We want to eventually scrub the inventory
@@ -54,7 +54,7 @@ def proc_event(eve):
 
 
 from multiprocessing import Pool
-for eve in cat:
-    proc_event(eve)
-#pool = Pool(40)
-#pool.map(proc_event, cat)
+#for eve in cat:
+#    proc_event(eve)
+pool = Pool(40)
+pool.map(proc_event, cat)
