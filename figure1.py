@@ -125,4 +125,4 @@ plt.title('Events used for NE')
 plt.annotate('(d)', xy=(-0.1, 1.1), xycoords='axes fraction')
 
 
-plt.show()
+plt.savefig('figure1.png', format='PNG', dpi=400)

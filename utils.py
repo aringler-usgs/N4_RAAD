@@ -8,7 +8,7 @@ from obspy.clients.fdsn import Client
 from obspy.taup import TauPyModel
 import matplotlib.pyplot as plt
 from itertools import combinations
-
+import os
 import matplotlib as mpl
 mpl.rc('font',family='serif')
 mpl.rc('font',serif='Times') 
@@ -25,17 +25,25 @@ def mean_coors(inv):
             lats.append(sta.latitude)
     return np.mean(lons), np.mean(lats)
     
+def min_max_coors(inv):
+    lons, lats = [], []
+    for net in inv:
+        for sta in net:
+            lons.append(sta.longitude)
+            lats.append(sta.latitude)
+    return min(lons), max(lons), min(lats), max(lats)
+    
 def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
         paramdic['station_radius'] = 2.0
         paramdic['min_radius'] = 20.
         paramdic['max_radius'] = 80.
-        paramdic['min_mag'] = 4.0
+        paramdic['min_mag'] = 6.0
         paramdic['max_mag'] = 8.0
         paramdic['length'] = 60
         paramdic['fmin'] = 1./10.
-        paramdic['fmax'] = 1./2.
+        paramdic['fmax'] = 1./5.
         paramdic['phase'] = 'P'
         paramdic['winlength'] = 50.
     elif phase == 'Rayleigh':
@@ -76,8 +84,8 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
                                                   distance_in_degree=disdeg, phase_list=paramdic['phase'])
                 if len(arrivals) == 0:
                     break
-                pstime = (eve.origins[0].time + arrivals[0].time)-20.
-                petime = pstime + paramdic['winlength']
+                pstime = (eve.origins[0].time + arrivals[0].time)-40.
+                petime = pstime + paramdic['winlength'] + 50.
                 try:
                     st += client.get_waveforms(net.code, sta.code, chan.location_code, 
                                                 chan.code, pstime, petime, attach_response = False)
@@ -124,13 +132,16 @@ def proc_data(st, inv, paramdic, eve):
         tr.stats.back_azimuth = bazi
     st.rotate('->ZNE', inventory=inv)
     st.rotate('NE->RT', inventory=inv)
-    
-    st.trim(st[0].stats.starttime+20., st[0].stats.endtime, pad=True, fill_value=0.)
+    for tr in st:
+        
+        stime = tr.stats.starttime + 30.
+        etime = stime + paramdic['winlength']
+        tr.trim(stime, etime, pad=True, fill_value=0.)
     st.taper(0.05)
+
     newlen = min([tr.stats.npts for tr in st])
     for tr in st:
-        tr.data[:newlen]
-
+        tr.data = tr.data[:newlen]
     return st
 
 
@@ -170,8 +181,6 @@ def comp_stack(st, comp):
     
 def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     st2 = st.select(component=comp)
-    st2 = st2.copy()
-    
     diss = []
     # compute distances
     for tr in st2:
@@ -183,28 +192,9 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     print(diss)
     mdiss = min(diss)
     Mdiss = max(diss)
-    
-    # super nearby stations
-    if Mdiss - mdiss < 2:
-        smallplot = True
-        diss = np.arange(float(len(st2)))
-        for tr in st2:
-            tr.data /= np.max(np.abs(stack))
-        stack /= np.max(np.abs(stack))
-        
-    else:
-        smallplot = False
-                
-    
     ptp = np.ptp(stack)
-    
-    print(diss)
     ran = 0.3*(Mdiss-mdiss)*ptp
-    if smallplot:
-        ran = 1.
-    
-    diss /= ran
-    fig = plt.figure(1,figsize=(16,12))
+    fig = plt.figure(1,figsize=(12,12))
     tithand = st[0].stats.network + ' ' + paramdic['phase'] + '-Wave ' 
     if comp == 'R':
         tithand += ' Radial '
@@ -222,51 +212,50 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     gmax, gmin = -100., 500.
     tithand += ' $' + magstr + '$=' + str(mag)
     plt.title(tithand)
-    labs = []
     for pair in zip(diss, st2):
-        labs.append((pair[1].id).replace('.',' '))
         t = pair[1].times()
         if max(pair[1].data/ran + pair[0]) > gmax:
             gmax = max(pair[1].data/ran + pair[0])
         if min(pair[1].data/ran + pair[0]) <  gmin:
             gmin = min(pair[1].data/ran + pair[0])
-        if pair[1].max() > np.max(np.abs(stack))*3.:
-            p = plt.plot(t, (pair[1].data)/(np.max(np.abs(stack))*3.) + pair[0])
-            plt.text(min(t)+1., pair[0]+.2, (pair[1].id)[:-4].replace('.',' ') + ' gain', color=p[0].get_color())
-        else:
-            p = plt.plot(t, pair[1].data/ran + pair[0])
-            plt.text(min(t)+1., pair[0]-+.2, (pair[1].id)[:-4].replace('.',' '), color=p[0].get_color())
-
+        p = plt.plot(t, pair[1].data/ran + pair[0])
+        plt.text(min(t)+1., pair[0]-+.2, (pair[1].id)[:-4].replace('.',' '), color=p[0].get_color())
         plt.plot(t, stack/ran + pair[0], color='k', alpha=0.5, linewidth=3)
-    if smallplot:
-        plt.yticks(diss, labs)
-    plt.plot([10., 10.], [-1000., 1000.], color='k', linewidth=3)
+    plt.plot([10., 10.], [0., 2*Mdiss+ ran], color='k', linewidth=3)
     plt.ylim((gmin - 0.02*gmin, gmax + 0.02*gmax))
-    if smallplot:
-        plt.ylim((min(diss)-1,max(diss)+1))
     plt.xlim((min(t),max(t)))
     plt.xlabel('Time (s)')
-    if smallplot:
-        plt.ylabel('Station index')
-    else:
-        plt.ylabel('Distance (deg)')
-    plt.savefig(st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
+    plt.ylabel('Distance (deg)')
+    if not os.path.exists(st[0].stats.network + '_results'):
+        os.mkdir(st[0].stats.network + '_results')
+    
+    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
                 str(eve['origins'][0]['time'].julday) + '_' +  str(eve['origins'][0]['time'].hour).zfill(2) +
                 str(eve['origins'][0]['time'].minute).zfill(2) + '.png', format='PNG', dpi=400)
-
+    
+    #plt.show()
     plt.clf()
     plt.close()
     return
+
     
     
-def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
+def write_event_results(st, stack, eve, not_used, comp, inv, paramdic, lat = None, lon = None):
     st2 = st.select(component=comp)
     # we will make a csv file with the infor for each channel for the event
-    filehand = 'Results_' + st2[0].stats.network + '_' + comp + '_' + paramdic['phase'] + \
+    
+    if not os.path.exists(st[0].stats.network + '_results'):
+        os.mkdir(st[0].stats.network + '_results')
+    filehand = st[0].stats.network + '_results/Results_' + st2[0].stats.network + '_' + \
+                comp + '_' + paramdic['phase'] + \
                 '_' + str(eve['origins'][0]['time'].year) + \
                 str(eve['origins'][0]['time'].julday) + '_' + \
                 str(eve['origins'][0]['time'].hour).zfill(2) + \
-                str(eve['origins'][0]['time'].minute).zfill(2) + '.csv'
+                str(eve['origins'][0]['time'].minute).zfill(2) 
+    if lat is not None:
+        filehand += '_'+ str(abs(lat)) + '_' + str(abs(lon)) 
+    filehand += '.csv'
+
     
     f = open(filehand,'w')
     f.write('ID, dis, azimuth, depth, mag, amp, shift, corr, used, ptp, snr \n')
@@ -302,7 +291,77 @@ def write_event_results(st, stack, eve, not_used, comp, inv, paramdic):
     return
     
     
+def pretty_plot_small(st, stack, eve, not_used, comp, inv, paramdic):
+    st2 = st.select(component=comp)
+    st2 = st2.copy()
+    
+    diss = []
+    # compute distances
+    for tr in st2:
+        coors = inv.get_coordinates(tr.id[:-1] + 'Z')
+        (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], 
+                                            eve.origins[0].latitude, eve.origins[0].longitude)
+        disdeg = kilometer2degrees(dis/1000.)
+        diss.append(disdeg)
+    mdiss = min(diss)
+    Mdiss = max(diss)
+    
 
+    diss = np.arange(float(len(st2)))
+    for tr in st2:
+        tr.data /= np.max(np.abs(stack))
+    stack /= np.max(np.abs(stack))
+        
+
+    ptp = np.ptp(stack)
+    
+
+    ran = 1.
+
+    fig = plt.figure(1,figsize=(16,12))
+    tithand = st[0].stats.network + ' ' + paramdic['phase'] + '-Wave ' 
+    if comp == 'R':
+        tithand += ' Radial '
+    elif comp == 'Z':
+        tithand += ' Vertical '
+    elif comp == 'T':
+        tithand += ' Transverse '
+    tithand += str(eve['origins'][0]['time'].year) + ' '
+    tithand += str(eve['origins'][0]['time'].julday) + ' '
+    tithand += str(eve['origins'][0]['time'].hour).zfill(2) + ':' + str(eve['origins'][0]['time'].minute).zfill(2)
+    mag = eve.magnitudes[0].mag
+    magstr = eve.magnitudes[0].magnitude_type
+    if 'Lg' in magstr:
+        magstr = 'mb_{Lg}'
+    tithand += ' $' + magstr + '$=' + str(mag)
+    plt.title(tithand)
+    labs = []
+    for pair in zip(diss, st2):
+        labs.append((pair[1].id).replace('.',' '))
+        t = pair[1].times()
+        if pair[1].max() > np.max(np.abs(stack))*3.:
+            p = plt.plot(t, (pair[1].data)/(np.max(np.abs(stack))*3.) + pair[0])
+            plt.text(min(t)+1., pair[0]+.2, (pair[1].id)[:-4].replace('.',' ') + ' gain', color=p[0].get_color())
+        else:
+            p = plt.plot(t, pair[1].data/ran + pair[0])
+            plt.text(min(t)+1., pair[0]-+.2, (pair[1].id)[:-4].replace('.',' '), color=p[0].get_color())
+        plt.plot(t, stack/ran + pair[0], color='k', alpha=0.5, linewidth=3)
+    plt.yticks(diss, labs)
+    plt.plot([10., 10.], [-1000., 1000.], color='k', linewidth=3)
+
+    plt.ylim((min(diss)-1,max(diss)+1))
+    plt.xlim((min(t),max(t)))
+    plt.xlabel('Time (s)')
+    plt.ylabel('Station index')
+    if not os.path.exists(st[0].stats.network + '_results'):
+        os.mkdir(st[0].stats.network + '_results')
+    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
+                str(eve['origins'][0]['time'].julday) + '_' +  str(eve['origins'][0]['time'].hour).zfill(2) +
+                str(eve['origins'][0]['time'].minute).zfill(2) + '.png', format='PNG', dpi=400)
+
+    plt.clf()
+    plt.close()
+    return
         
 
     
