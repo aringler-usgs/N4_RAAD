@@ -32,11 +32,26 @@ def min_max_coors(inv):
             lons.append(sta.longitude)
             lats.append(sta.latitude)
     return min(lons), max(lons), min(lats), max(lats)
+
+def scrub_inventory(inv):
+    for net in inv:
+        for sta in net:
+            chans_remove = []
+            for chan in sta:
+                if chan.code in ['HN1', 'HN2', 'HNZ', 'HNE', 'HNN']:
+                    chans_remove.append(chan)
+                if chan.code in ['LH1', 'LH2', 'LHZ', 'LHN', 'LHE']:
+                    chans_remove.append(chan)
+                if chan.code in ['VH1', 'VH2', 'VHZ', 'VHN', 'VHE']:
+                    chans_remove.append(chan)
+            for chan in chans_remove:
+                sta.channels.remove(chan)
+    return inv
     
 def get_parameters(phase):
     paramdic = {}
     if phase == 'P':
-        paramdic['station_radius'] = 2.0
+        paramdic['station_radius'] = 3.0
         paramdic['min_radius'] = 20.
         paramdic['max_radius'] = 80.
         paramdic['min_mag'] = 6.0
@@ -148,7 +163,6 @@ def proc_data(st, inv, paramdic, eve):
 
 def comp_stack(st, comp):
     st2 = st.select(component=comp)
-    print(st2)
     comb = combinations(range(len(st2)),2)
     used, not_used = [], []
     results = {}
