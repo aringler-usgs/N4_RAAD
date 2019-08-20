@@ -44,6 +44,8 @@ def scrub_inventory(inv):
                     chans_remove.append(chan)
                 if chan.code in ['VH1', 'VH2', 'VHZ', 'VHN', 'VHE']:
                     chans_remove.append(chan)
+                if chan.code in ['UH1', 'UH2', 'UHZ', 'UHN', 'UHE']:
+                    chans_remove.append(chan)
             for chan in chans_remove:
                 sta.channels.remove(chan)
     return inv
@@ -107,19 +109,19 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
                     if debug:
                         print('Got data for: ' + sncl)
                 except:
-                    print('No data for: ' + sncl)
+                    #print('No data for: ' + sncl)
                     bad_stas.append(sncl)
     #st = choptocommon(st)
     return st, bad_stas
 
-def choptocommon(st):
+def choptocommon(st, debug=False):
     """ A function to chop the data to a common time window. """
     st2 = st.copy()
     stime = max([tr.stats.starttime for tr in st])
     etime = min([tr.stats.endtime for tr in st])
     st2.trim(starttime=stime, endtime=etime)
     if debug:
-        print 'starttime: '+str(stime)+' endtime: '+str(etime)
+        print('starttime: '+str(stime)+' endtime: '+str(etime))
     return st2
 
 
@@ -161,7 +163,7 @@ def proc_data(st, inv, paramdic, eve):
 
 
 
-def comp_stack(st, comp):
+def comp_stack(st, comp, debug=False):
     st2 = st.select(component=comp)
     comb = combinations(range(len(st2)),2)
     used, not_used = [], []
@@ -171,8 +173,9 @@ def comp_stack(st, comp):
         tr2 = st2[ele[1]].copy()
         cc = correlate(tr1.data, tr2.data, 20)
         shift, value = xcorr_max(cc)
-        print(shift)
-        print(value)
+        if debug:
+            print(shift)
+            print(value)
         if value <= 0.8:
             continue
         tr2.stats.starttime -= float(shift)/tr2.stats.sampling_rate
@@ -193,7 +196,7 @@ def comp_stack(st, comp):
     return stack, not_used
         
     
-def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
+def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic, debug=False):
     st2 = st.select(component=comp)
     diss = []
     # compute distances
@@ -203,7 +206,8 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
                                             eve.origins[0].latitude, eve.origins[0].longitude)
         disdeg = kilometer2degrees(dis/1000.)
         diss.append(disdeg)
-    print(diss)
+    if debug:
+        print(diss)
     mdiss = min(diss)
     Mdiss = max(diss)
     ptp = np.ptp(stack)
@@ -252,15 +256,31 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic):
     plt.close()
     return
 
+
+def check_files(net, paramdic, eve, lat, lon):
+    file_exist = False
+    comp = 'Z'
+    filehand = net  + '_results/Results_' + net + '_' + \
+                comp + '_' + paramdic['phase'] + \
+                '_' + str(eve['origins'][0]['time'].year) + \
+                str(eve['origins'][0]['time'].julday) + '_' + \
+                str(eve['origins'][0]['time'].hour).zfill(2) + \
+                str(eve['origins'][0]['time'].minute).zfill(2)
+    filehand += '_'+ str(abs(lat)) + '_' + str(abs(lon)) 
+    filehand += '.csv'
+    if os.path.exists(filehand):
+        file_exist = True
+    return file_exist
+
     
     
-def write_event_results(st, stack, eve, not_used, comp, inv, paramdic, lat = None, lon = None):
+def write_event_results(st, net, stack, eve, not_used, comp, inv, paramdic, lat = None, lon = None):
     st2 = st.select(component=comp)
     # we will make a csv file with the infor for each channel for the event
     
-    if not os.path.exists(st[0].stats.network + '_results'):
-        os.mkdir(st[0].stats.network + '_results')
-    filehand = st[0].stats.network + '_results/Results_' + st2[0].stats.network + '_' + \
+    if not os.path.exists(net + '_results'):
+        os.mkdir(net + '_results')
+    filehand = net + '_results/Results_' + net + '_' + \
                 comp + '_' + paramdic['phase'] + \
                 '_' + str(eve['origins'][0]['time'].year) + \
                 str(eve['origins'][0]['time'].julday) + '_' + \
@@ -325,10 +345,7 @@ def pretty_plot_small(st, stack, eve, not_used, comp, inv, paramdic):
     for tr in st2:
         tr.data /= np.max(np.abs(stack))
     stack /= np.max(np.abs(stack))
-        
-
     ptp = np.ptp(stack)
-    
 
     ran = 1.
 
