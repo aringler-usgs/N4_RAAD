@@ -47,7 +47,10 @@ def scrub_inventory(inv):
                 if chan.code in ['UH1', 'UH2', 'UHZ', 'UHN', 'UHE']:
                     chans_remove.append(chan)
             for chan in chans_remove:
-                sta.channels.remove(chan)
+                try:
+                    sta.channels.remove(chan)
+                except:
+                    pass
     return inv
     
 def get_parameters(phase):
