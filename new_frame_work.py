@@ -7,8 +7,8 @@ import utils
 
 
     
-debug = True
-net ="N4"
+debug = False
+net ="IW"
 model = TauPyModel(model="iasp91")
 client = Client()  
 stime = UTCDateTime('2017-204T00:00:00')
@@ -16,7 +16,7 @@ etime = UTCDateTime('2019-204T00:00:00')
 #stime = UTCDateTime('2019-06-25T07:00:00')
 #etime = UTCDateTime('2019-06-25T10:00:00')
 
-small = False
+small = True
 inv = client.get_stations(starttime=stime, endtime=etime, station="*",
                           channel="*H*", network=net, level="response")
 
@@ -37,14 +37,18 @@ if small:
         # Get the data 
         try:
             st, bad_stas = utils.get_data(inv, eve, paramdic, model, client)
-            print(st)
+            if debug:
+                print(st)
             st = utils.proc_data(st, inv, paramdic, eve)
         except:
             return
         for comp in ['Z', 'R']:
             stack, not_used = utils.comp_stack(st, comp)
+            print('Here we go')
+            print(not_used)
             if len(stack) == 0:
-                print('Bad event')
+                if debug:
+                    print('Bad event')
                 continue
             # We have a pretty plot showing all of the components
             try:
@@ -53,21 +57,22 @@ if small:
                 utils.write_event_results(st, net, stack, eve, not_used, comp, inv, paramdic)
                 print('########################### We wrote some results ##################3')
             except:
-                print('Problem')
-                print(eve)
+                if debug:
+                    print('Problem')
+                    print(eve)
                 continue
         return
 
 
 
-    from multiprocessing import Pool
-    #for eve in cat:
-        #proc_event(eve)
+    #from multiprocessing import Pool
+    for eve in cat:
+        proc_event(eve)
         #import sys
         #sys.exit()
-    if 'pool' not in vars():
-        pool = Pool(60)
-    pool.map(proc_event, cat)
+    #if 'pool' not in vars():
+    #    pool = Pool(60)
+    #pool.map(proc_event, cat)
     
 else:
     minlon, Mlon, minlat, Mlat = utils.min_max_coors(inv)

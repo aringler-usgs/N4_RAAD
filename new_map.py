@@ -36,7 +36,7 @@ fig= plt.figure(figsize=(12,12))
 for idx, comp in enumerate(comps):
     
     dic_all ={}
-    files = glob.glob(net + '_results/Results_' + net + '_' + comp + '_*.csv')
+    files = glob.glob(net + '_results/Results_' + net + '_' + comp + '*_2019*.csv')
 
     for curfile in files:
         stuff = plot_utils.parse(curfile)
@@ -48,11 +48,15 @@ for idx, comp in enumerate(comps):
                 dic_all[item] += stuff[item]
 
 
+    print(dic_all['time'])
 
-    key = 'used'
+    key = 'corr'
 
     lats, lons, staval, parameter, stas = plot_utils.get_plot_params(dic_all, inv, key)
     
+    key2 = 'snr'
+    
+    lats2, lons2, staval2, parameter2, stas2 = plot_utils.get_plot_params(dic_all, inv, key2)
 
     boxcoords=[min(lats) -1., min(lons)-1., max(lats) +1. , max(lons) + 1.]
     extent=[boxcoords[1], boxcoords[3], boxcoords[0], boxcoords[2]]
@@ -61,7 +65,10 @@ for idx, comp in enumerate(comps):
     ax[str(idx)] = plt.subplot(2,1,idx+1, projection=ccrs.AlbersEqualArea(central_lon, central_lat))
     ax[str(idx)] = setupmap(central_lon, central_lat, ax[str(idx)])
 
-    sc = ax[str(idx)].scatter(lons, lats, staval, c= staval, transform=ccrs.PlateCarree())
+    sc = ax[str(idx)].scatter(lons, lats,  c = staval,  transform=ccrs.PlateCarree())
+    
+
+    
     cbar = fig.colorbar(sc, orientation='vertical', shrink=0.7)
     cbar.ax.set_ylabel(parameter)
     if idx == 0:
@@ -76,5 +83,5 @@ for idx, comp in enumerate(comps):
 #cbar.ax.set_ylabel(parameter)
 
 
-plt.savefig('Percentage_used.png', format='PNG', dpi=400)
-
+plt.savefig('map_' + key + '_' + net + '.png', format='PNG', dpi=400)
+plt.show()

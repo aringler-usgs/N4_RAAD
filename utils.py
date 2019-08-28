@@ -113,6 +113,7 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
                         print('Got data for: ' + sncl)
                 except:
                     #print('No data for: ' + sncl)
+                    
                     bad_stas.append(sncl)
     #st = choptocommon(st)
     return st, bad_stas
@@ -195,7 +196,7 @@ def comp_stack(st, comp, debug=False):
         stack = []
     for idx in range(len(st)):
         if idx not in used:
-            not_used.append(idx)
+            not_used.append(st[idx].id)
     return stack, not_used
         
     
