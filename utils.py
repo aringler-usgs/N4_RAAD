@@ -6,6 +6,7 @@ from obspy.signal.cross_correlation import correlate, xcorr_max
 from obspy.core import UTCDateTime
 from obspy.clients.fdsn import Client
 from obspy.taup import TauPyModel
+from obspy.signal.rotate import rotate_ne_rt
 import matplotlib.pyplot as plt
 from itertools import combinations
 import os
@@ -199,6 +200,32 @@ def comp_stack(st, comp, debug=False):
             not_used.append(st[idx].id)
     return stack, not_used
         
+
+def azimuth_check(stack, st, debug = True):
+    # stack is in the radial direction
+    # for each R and T
+    results = {}
+    stas = list(set([tr.stats.station for tr in st]))
+    for sta in stas:
+        st_sta = st.select(station = sta)
+        best_val = -100.
+        for ang in range(-30,30,1):
+            ang = float(ang)
+            print(ang)
+            st2 = st_sta.copy()
+            # rotate
+            R.data, T.data = rotate_ne_rt(st2.select(component='R')[0].data, st2.select(component='T')[0].data,ang)
+            cc = correlation(st2[0].data, stack, 20)
+            shift, value = xcorr_max(cc)
+            if np.abs(value) > best_val:
+                best_val = value
+                best_ang = ang        
+        results[sta] = [best_val, best_ang]
+
+    print(results)
+    return results
+    
+    
     
 def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic, debug=False):
     st2 = st.select(component=comp)

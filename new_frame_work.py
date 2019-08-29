@@ -44,6 +44,11 @@ if small:
             return
         for comp in ['Z', 'R']:
             stack, not_used = utils.comp_stack(st, comp)
+            if comp == 'R':
+                utils.azimuth_check(stack, st)
+                import sys
+                sys.exit()
+            
             print('Here we go')
             print(not_used)
             if len(stack) == 0:
@@ -115,29 +120,30 @@ else:
                     if len(st.select(component=comp)) < 3:
                         continue
                     stack, not_used = utils.comp_stack(st, comp)
+                    
                     if len(stack) == 0:
                         print('Bad event')
                         continue
                     ## We have a pretty plot showing all of the components
-                    #try:
-                    if True:
-                        #utils.pretty_plot(st, stack, eve, not_used, comp, inv, paramdic)
+                    try:
+                    #if True:
+                        utils.pretty_plot(st, stack, eve, not_used, comp, inv, paramdic)
                         ## Add the lats and lons for book keeping.
                         utils.write_event_results(st, net, stack, eve, not_used, comp, inv, paramdic, lat, lon)
                         
-                    #except:
-                    #    print('Problem')
-                    #    print(eve)
-                    #    continue
+                    except:
+                        print('Problem')
+                        print(eve)
+                        continue
                 print('Finished: ' + str(lat) + ' ' + str(lon))
                 print(eve)
         return
 
             
-    #for eve in cat:
-    #    proc_event(eve)
-    from multiprocessing import Pool
-    if 'pool' not in vars():
-        pool = Pool(80)
-    pool.map(proc_event, cat)
+    for eve in cat:
+        proc_event(eve)
+    #from multiprocessing import Pool
+    #if 'pool' not in vars():
+    #    pool = Pool(80)
+    #pool.map(proc_event, cat)
 

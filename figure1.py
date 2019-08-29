@@ -1,14 +1,13 @@
 #!/usr/bin/env python
+import cartopy.crs as ccrs
+import cartopy.io.shapereader as shpreader
+import cartopy.feature as cfeature
 from obspy.clients.fdsn import Client
 from obspy.core import UTCDateTime
-import matplotlib as mpl
-from mpl_toolkits.basemap import Basemap
+import matplotlib.pyplot as plt
 import numpy as np
 import utils
-
-
-
-import matplotlib.pyplot as plt
+import matplotlib as mpl
 mpl.rc('font',family='serif')
 mpl.rc('font',serif='Times') 
 mpl.rc('text', usetex=True)
@@ -17,113 +16,143 @@ mpl.rc('font',size=18)
 debug = True
 client = Client()
 
-net = "IW"
 
-stime = UTCDateTime('2018-001T00:00:00')
-etime = UTCDateTime('2019-001T00:00:00')
+def setupmap(central_lon, central_lat,handle):
+    #handle = plt.axes(projection=ccrs.AlbersEqualArea(central_lon, central_lat))
+    handle.set_extent(extent)
 
+    handle.add_feature(cfeature.LAND)
+    handle.add_feature(cfeature.OCEAN)
+    handle.add_feature(cfeature.COASTLINE)
+    #handle.add_feature(cfeature.BORDERS, linestyle=':')
+    handle.add_feature(cfeature.LAKES)
+    handle.add_feature(cfeature.RIVERS)
+    #handle.add_feature(cfeature.STATES, edgecolor='gray')
+    return handle
 
+net = 'NE,IW'
 
-def plot_stations(net):
-    inv = client.get_stations(network=net, station="*",
-                            channel = '*HZ', level="response",
-                            starttime=stime, endtime = etime)
-
-    lats, lons = [], []
-
-
-    for net in inv:
-        for sta in net:
-            for chan in sta:
-                coors = inv.get_coordinates(net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code)
-                lats.append(coors['latitude'])
-                lons.append(coors['longitude'])
-                break
-            
+stime = UTCDateTime('2009-204T00:00:00')
+etime = UTCDateTime('2019-204T00:00:00')
 
 
-    mlon = np.mean(lons)
-    mlat = np.mean(lats)
+fig= plt.figure(figsize=(12,6))
 
+inv = client.get_stations(network=net, station="*",
+                        channel = '*HZ', level="response",
+                        starttime=stime, endtime = etime)
 
-    m = Basemap(projection='merc', lon_0=mlon, lat_0=mlat, llcrnrlon=mlon-7, 
-                llcrnrlat=mlat-7, urcrnrlon=mlon+7, urcrnrlat=mlat+7, epsg=4269, resolution="i")
-    m.drawcountries(linewidth=1., zorder=3.)
-    m.fillcontinents(color='.9', lake_color='C0')
-    m.drawmapboundary(fill_color='C0')
-    m.drawstates(linewidth=1., zorder=3.)
-    ax=plt.gca()
-    x,y =m(lons, lats)
-    m.scatter(x,y, 200, color="C1", edgecolor="C1", marker="v", zorder=3)
-    return
+lats, lons, cols = [], [],[]
+for cnet in inv:
+    for sta in cnet:
+        for chan in sta:
+            lats.append(chan.latitude)
+            lons.append(chan.longitude)
+            if cnet.code =='NE':
+                cols.append('C1')
+            else:
+                cols.append('C2')
+             
+
+mlon = np.mean(lons)
+mlat = np.mean(lats)
+boxcoords=[min(lats) -1., min(lons)-1., max(lats) +1. , max(lons) + 1.]
+extent=[boxcoords[1], boxcoords[3], boxcoords[0], boxcoords[2]]
+central_lon = np.mean(extent[:2])
+central_lat = np.mean(extent[2:])
+
+#ax1 = plt.subplot(1,2,1, projection=ccrs.Mercator(central_lon))
+#ax1 = setupmap(central_lon, central_lat, ax1)
+#sc = ax1.scatter(lons, lats, 200., color='C1', edgecolor='C1', marker="v", transform=ccrs.PlateCarree())
     
-def plot_events(net):
-    inv = client.get_stations(network=net, station="*",
-                            channel = '*HZ', level="response",
-                            starttime=stime, endtime = etime)
 
-    lats, lons = [], []
-
-
-    for net in inv:
-        for sta in net:
-            for chan in sta:
-                coors = inv.get_coordinates(net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code)
-                lats.append(coors['latitude'])
-                lons.append(coors['longitude'])
-                break
-            
+ax = plt.subplot(1,1,1, projection=ccrs.Mollweide(central_lon))
+ax.add_feature(cfeature.LAND)
+ax.add_feature(cfeature.OCEAN)
+ax.add_feature(cfeature.COASTLINE)
+ax.add_feature(cfeature.BORDERS, linestyle=':')
+ax.add_feature(cfeature.LAKES, alpha=0.5)
+ax.add_feature(cfeature.RIVERS)
+ax.add_feature(cfeature.STATES, edgecolor='gray')
+ax.set_global()
 
 
-    mlon = np.mean(lons)
-    mlat = np.mean(lats)
-    m = Basemap(projection='ortho',lon_0=mlon,lat_0=mlat,resolution='l')
-    m.drawcoastlines()
-    m.fillcontinents(color='.9' ,lake_color='C0')
-    # draw parallels and meridians.
-    m.drawparallels(np.arange(-90.,120.,30.))
-    m.drawmeridians(np.arange(0.,420.,60.))
-    m.drawmapboundary(fill_color='C0')
-    x,y =m(lons, lats)
-    m.scatter(x,y, 100, color="C1", edgecolor="C1", marker="v", zorder=3)
 
-    paramdic = utils.get_parameters('P')
 
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
+
+
+
+
+
+
+
+
+inv = client.get_stations(network='IW', station="*",
+                        channel = '*HZ', level="response",
+                        starttime=stime, endtime = etime)
+
+lats, lons= [], []
+for cnet in inv:
+    for sta in cnet:
+        for chan in sta:
+            lats.append(chan.latitude)
+            lons.append(chan.longitude)
+
+sc = ax.scatter(lons, lats, 200., color='C1', edgecolor='k', marker="v", transform=ccrs.PlateCarree(), label='IW Stations')
+
+mlon = np.mean(lons)
+mlat = np.mean(lats)
+
+paramdic = utils.get_parameters('P')
+cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
                         latitude=mlat, longitude=mlon, maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
-    evelats = []
-    evelons = []
-    for eve in cat:
-        evelats.append(eve.origins[0].latitude)
-        evelons.append(eve.origins[0].longitude)
-    x, y = m(evelons, evelats)
-    m.scatter(x, y, 50, color="C2", edgecolor="C2", marker="o", zorder=3)
-    
-    
-    
-    
-    return    
+evelats = []
+evelons = []
+for eve in cat:
+    evelats.append(eve.origins[0].latitude)
+    evelons.append(eve.origins[0].longitude)
+
+print(evelons)
+
+ax.scatter(evelons, evelats, 65, color="C2", edgecolor="C2", marker="o", zorder=3, alpha=0.5, transform=ccrs.PlateCarree(), label='IW Earthquakes')
 
 
+inv = client.get_stations(network='NE', station="*",
+                        channel = '*HZ', level="response",
+                        starttime=stime, endtime = etime)
 
-fig = plt.figure(1, figsize=(12,12))
+lats, lons= [], []
+for cnet in inv:
+    for sta in cnet:
+        for chan in sta:
+            lats.append(chan.latitude)
+            lons.append(chan.longitude)
 
-plt.subplot(2,2,1)
-plot_stations("IW")
-plt.title('Intermountain West (IW) Network')
-plt.annotate('(a)', xy=(-0.1, 1.1), xycoords='axes fraction')
-plt.subplot(2,2,2)
-plot_events("IW")
-plt.title('Events used for IW')
-plt.annotate('(b)', xy=(-0.1, 1.1), xycoords='axes fraction')
-plt.subplot(2,2,3)
-plot_stations("NE")
-plt.title('New England (NE) Network')
-plt.annotate('(c)', xy=(-0.1, 1.1), xycoords='axes fraction')
-plt.subplot(2,2,4)
-plot_events("NE")
-plt.title('Events used for NE')
-plt.annotate('(d)', xy=(-0.1, 1.1), xycoords='axes fraction')
+sc = ax.scatter(lons, lats, 200., color="C3", edgecolor='k', marker="v", transform=ccrs.PlateCarree(), label='NE Stations')
 
+mlon = np.mean(lons)
+mlat = np.mean(lats)
 
-plt.savefig('figure1.png', format='PNG', dpi=400)
+paramdic = utils.get_parameters('P')
+cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
+                        latitude=mlat, longitude=mlon, maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
+evelats = []
+evelons = []
+for eve in cat:
+    evelats.append(eve.origins[0].latitude)
+    evelons.append(eve.origins[0].longitude)
+
+print(evelons)
+
+ax.scatter(evelons, evelats, 65, color="C4", edgecolor="C4", alpha=0.5, marker="o", zorder=3, transform=ccrs.PlateCarree(), label='NE Earthquake')
+box = ax.get_position()
+ax.set_position([box.x0, box.y0 + box.height * 0.1,
+                 box.width, box.height * 0.9])
+
+# Put a legend below current axis
+ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),
+          fancybox=True, shadow=True, ncol=5)
+
+plt.savefig('figure1.png',format='PNG', dpi=400)
+plt.show()
+
