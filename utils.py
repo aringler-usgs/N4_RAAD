@@ -9,6 +9,7 @@ from obspy.taup import TauPyModel
 from obspy.signal.rotate import rotate_ne_rt
 import matplotlib.pyplot as plt
 from itertools import combinations
+from math import cos, sin, radians
 import os
 import matplotlib as mpl
 mpl.rc('font',family='serif')
@@ -22,6 +23,7 @@ def mean_coors(inv):
     lons, lats = [], []
     for net in inv:
         for sta in net:
+            print(sta)
             lons.append(sta.longitude)
             lats.append(sta.latitude)
     return np.mean(lons), np.mean(lats)
@@ -34,24 +36,38 @@ def min_max_coors(inv):
             lats.append(sta.latitude)
     return min(lons), max(lons), min(lats), max(lats)
 
-def scrub_inventory(inv):
+def scrub_inventory(inv, debug = True):
     for net in inv:
         for sta in net:
             chans_remove = []
+            chans_good = []
             for chan in sta:
+                if debug:
+                    print(chan)
                 if chan.code in ['HN1', 'HN2', 'HNZ', 'HNE', 'HNN']:
                     chans_remove.append(chan)
-                if chan.code in ['LH1', 'LH2', 'LHZ', 'LHN', 'LHE']:
+                elif chan.code in ['LH1', 'LH2', 'LHZ', 'LHN', 'LHE']:
                     chans_remove.append(chan)
-                if chan.code in ['VH1', 'VH2', 'VHZ', 'VHN', 'VHE']:
+                elif chan.code in ['VH1', 'VH2', 'VHZ', 'VHN', 'VHE']:
                     chans_remove.append(chan)
-                if chan.code in ['UH1', 'UH2', 'UHZ', 'UHN', 'UHE']:
+                elif chan.code in ['UH1', 'UH2', 'UHZ', 'UHN', 'UHE']:
                     chans_remove.append(chan)
+                else:
+                    chans_good.append(chan)
             for chan in chans_remove:
                 try:
                     sta.channels.remove(chan)
                 except:
                     pass
+            chans_good_codes = []
+            for chan in chans_good:
+                chans_good_codes.append(chan.code)
+            if ('HHZ' in chans_good_codes) and ('BHZ' in chans_good_codes):
+                inv.remove(channel='BH*', station=sta.code)
+            elif ('EHZ' in chans_good_codes) and ('BHZ' in chans_good_codes):
+                inv.remove(channel='BH*', station=sta.code)
+            elif ('EHZ' in chans_good_codes) and ('HHZ' in chans_good_codes):
+                inv.remove(channel='HH*', station=sta.code)
     return inv
     
 def get_parameters(phase):
@@ -74,17 +90,21 @@ def get_parameters(phase):
         paramdic['min_mag'] = 6.
         paramdic['max_mag'] = 8.5
         paramdic['length'] = 50
-        paramdic['fmin'] = 0.1
-        paramdic['fmax'] =1.
+        paramdic['fmin'] = 1./50.
+        paramdic['fmax'] =1./20.
+        paramdic['phase'] = 'Rayleigh'
+        paramdic['winlength'] = 400.
     elif  phase == 'S':
         paramdic['station_radius'] = 1.5
         paramdic['min_radius'] = 30.
         paramdic['max_radius'] = 80.
         paramdic['min_mag'] = 6.
         paramdic['max_mag'] = 8.5
-        paramdic['length'] = 50
-        paramdic['fmin'] = 0.1
-        paramdic['fmax'] =1.
+        paramdic['length'] = 80
+        paramdic['fmin'] = 1./20.
+        paramdic['fmax'] =1./5.
+        paramdic['phase'] = 'S'
+        paramdic['winlength'] = 100.
     else:
         pass
     
@@ -97,15 +117,32 @@ def get_data(inv, eve, paramdic, model, client, debug=False):
         for sta in net:
             for chan in sta:
                 sncl = net.code + '.' + sta.code + '.' + chan.location_code + '.' + chan.code
-                coors = inv.get_coordinates(sncl)
+                try:
+   
+                    coors = inv.get_coordinates(sncl, eve.origins[0].time)
+                except:
+                    #print('Coordinate problem with: ' + sncl)
+                    #print(eve.origins[0].time)
+                    #print(chan)
+                    continue
+
+                if debug:
+                    print(sncl)
+                    print(eve)
                 (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], 
                                                    eve.origins[0].latitude, eve.origins[0].longitude)
                 disdeg = kilometer2degrees(dis/1000.)
-                arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000.,
+                if paramdic['phase'] == 'Rayleigh':
+                    astime = (dis/1000.)/6.5
+                    pstime = (eve.origins[0].time + astime)-40.
+
+                else:    
+                    arrivals = model.get_travel_times(source_depth_in_km=eve.origins[0].depth/1000.,
                                                   distance_in_degree=disdeg, phase_list=paramdic['phase'])
-                if len(arrivals) == 0:
-                    break
-                pstime = (eve.origins[0].time + arrivals[0].time)-40.
+                    if len(arrivals) == 0:
+                        break
+                    pstime = (eve.origins[0].time + arrivals[0].time)-40.
+                
                 petime = pstime + paramdic['winlength'] + 50.
                 try:
                     st += client.get_waveforms(net.code, sta.code, chan.location_code, 
@@ -131,6 +168,7 @@ def choptocommon(st, debug=False):
 
 
 def proc_data(st, inv, paramdic, eve):
+
     for tr in st:
         if tr.stats.sampling_rate <= 1.:
             st.remove(tr)
@@ -145,20 +183,31 @@ def proc_data(st, inv, paramdic, eve):
             tr.decimate(5)    
     st.detrend('linear')
     st.detrend('constant')
-    st.remove_response(inventory=inv, output='VEL')
-    st.filter('bandpass', freqmin=paramdic['fmin'], freqmax=paramdic['fmax'])
+    st.merge(fill_value=0.)
     for tr in st:
-        coors = inv.get_coordinates(tr.id)
-        (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], 
-                                            eve.origins[0].latitude, eve.origins[0].longitude)
-        tr.stats.back_azimuth = bazi
-    st.rotate('->ZNE', inventory=inv)
-    st.rotate('NE->RT', inventory=inv)
+        tr.remove_response(inventory=inv, output='VEL')
+        print(tr)
+    st.filter('bandpass', freqmin=paramdic['fmin'], freqmax=paramdic['fmax'])
+    print(st)
     for tr in st:
         
         stime = tr.stats.starttime + 30.
         etime = stime + paramdic['winlength']
         tr.trim(stime, etime, pad=True, fill_value=0.)
+    print('Here is the trim')
+    print(st)
+    if len(st) == 0:
+        return st
+    for tr in st:
+        coors = inv.get_coordinates(tr.id, tr.stats.starttime)
+        (dis,azi, bazi) = gps2dist_azimuth(coors['latitude'], coors['longitude'], 
+                                            eve.origins[0].latitude, eve.origins[0].longitude)
+        tr.stats.back_azimuth = bazi
+    try:
+        st.rotate('->ZNE', inventory=inv)
+        st.rotate('NE->RT', inventory=inv)
+    except:
+        return Stream()
     st.taper(0.05)
 
     newlen = min([tr.stats.npts for tr in st])
@@ -181,7 +230,7 @@ def comp_stack(st, comp, debug=False):
         if debug:
             print(shift)
             print(value)
-        if value <= 0.8:
+        if value <= 0.7:
             continue
         tr2.stats.starttime -= float(shift)/tr2.stats.sampling_rate
         if 'stack' not in vars():
@@ -207,20 +256,26 @@ def azimuth_check(stack, st, debug = True):
     results = {}
     stas = list(set([tr.stats.station for tr in st]))
     for sta in stas:
-        st_sta = st.select(station = sta)
-        best_val = -100.
-        for ang in range(-30,30,1):
-            ang = float(ang)
-            print(ang)
-            st2 = st_sta.copy()
-            # rotate
-            R.data, T.data = rotate_ne_rt(st2.select(component='R')[0].data, st2.select(component='T')[0].data,ang)
-            cc = correlation(st2[0].data, stack, 20)
-            shift, value = xcorr_max(cc)
-            if np.abs(value) > best_val:
-                best_val = value
-                best_ang = ang        
-        results[sta] = [best_val, best_ang]
+        try:
+            st_sta = st.select(station = sta)
+            best_val = -100.
+            print(sta)
+            for ang in range(-180,180,10):
+                ang = float(ang)
+                print(ang)
+                st2 = st_sta.copy()
+                # rotate
+                Rdata = st2.select(component='R')[0].data*cos(radians(ang)) + st2.select(component='T')[0].data*sin(radians(ang))
+                cc = correlate(Rdata, stack, 20)
+                shift, value = xcorr_max(cc)
+                print(value)
+                print(ang)
+                if value > best_val:
+                    best_val = value
+                    best_ang = ang        
+            results[sta] = [best_val, best_ang]
+        except:
+            results[sta] = [0, 0]
 
     print(results)
     return results
@@ -259,7 +314,7 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic, debug=False):
     if 'Lg' in magstr:
         magstr = 'mb_{Lg}'
     gmax, gmin = -100., 500.
-    tithand += ' $' + magstr + '$=' + str(mag)
+    tithand += ' $' + magstr + '$' + str(mag)
     plt.title(tithand)
     for pair in zip(diss, st2):
         t = pair[1].times()
@@ -278,7 +333,8 @@ def pretty_plot(st, stack, eve, not_used, comp, inv, paramdic, debug=False):
     if not os.path.exists(st[0].stats.network + '_results'):
         os.mkdir(st[0].stats.network + '_results')
     
-    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
+    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + paramdic['phase'] 
+                + '_' + str(eve['origins'][0]['time'].year) +
                 str(eve['origins'][0]['time'].julday) + '_' +  str(eve['origins'][0]['time'].hour).zfill(2) +
                 str(eve['origins'][0]['time'].minute).zfill(2) + '.png', format='PNG', dpi=400)
     
@@ -395,7 +451,7 @@ def pretty_plot_small(st, stack, eve, not_used, comp, inv, paramdic):
     magstr = eve.magnitudes[0].magnitude_type
     if 'Lg' in magstr:
         magstr = 'mb_{Lg}'
-    tithand += ' $' + magstr + '$=' + str(mag)
+    tithand += ' $' + magstr + '$' + str(mag)
     plt.title(tithand)
     labs = []
     for pair in zip(diss, st2):
@@ -417,7 +473,8 @@ def pretty_plot_small(st, stack, eve, not_used, comp, inv, paramdic):
     plt.ylabel('Station index')
     if not os.path.exists(st[0].stats.network + '_results'):
         os.mkdir(st[0].stats.network + '_results')
-    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + str(eve['origins'][0]['time'].year) +
+    plt.savefig(st[0].stats.network + '_results/' + st[0].stats.network + '_' + comp + '_' + paramdic['phase'] 
+                + '_' + str(eve['origins'][0]['time'].year) +
                 str(eve['origins'][0]['time'].julday) + '_' +  str(eve['origins'][0]['time'].hour).zfill(2) +
                 str(eve['origins'][0]['time'].minute).zfill(2) + '.png', format='PNG', dpi=400)
 

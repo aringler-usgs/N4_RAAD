@@ -6,49 +6,54 @@ import numpy as np
 import utils
 
 
-    
-debug = False
-net ="IW"
+
+debug = True
+net = "PR"
 model = TauPyModel(model="iasp91")
-client = Client()  
-stime = UTCDateTime('2017-204T00:00:00')
-etime = UTCDateTime('2019-204T00:00:00')
+client = Client()
+stime = UTCDateTime('2019-01-01T00:00:00')
+etime = UTCDateTime('2022-01-01T00:00:00')
+multithread = True
 #stime = UTCDateTime('2019-06-25T07:00:00')
 #etime = UTCDateTime('2019-06-25T10:00:00')
+badstas = []
 
 small = True
 inv = client.get_stations(starttime=stime, endtime=etime, station="*",
                           channel="*H*", network=net, level="response")
 
 inv = utils.scrub_inventory(inv)
-
 if small:
     mlon, mlat = utils.mean_coors(inv)
     # We want to eventually scrub the inventory
 
-    paramdic = utils.get_parameters('P')
+    paramdic = utils.get_parameters('Rayleigh')
 
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
+    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'],
                         latitude=mlat, longitude=mlon, maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
 
 
 
     def proc_event(eve):
-        # Get the data 
-        try:
+        # Get the data
+        if True:
+        #try:
             st, bad_stas = utils.get_data(inv, eve, paramdic, model, client)
-            if debug:
-                print(st)
+            for tr in st:
+                if tr.stats.station in badstas:
+                    st.remove(tr)
             st = utils.proc_data(st, inv, paramdic, eve)
-        except:
-            return
+
+        #except:
+        #    return
         for comp in ['Z', 'R']:
-            stack, not_used = utils.comp_stack(st, comp)
+            stack, not_used = utils.comp_stack(st, comp, True)
             if comp == 'R':
-                utils.azimuth_check(stack, st)
-                import sys
-                sys.exit()
-            
+                pass
+                #utils.azimuth_check(stack, st)
+                #import sys
+                #sys.exit()
+
             print('Here we go')
             print(not_used)
             if len(stack) == 0:
@@ -57,10 +62,10 @@ if small:
                 continue
             # We have a pretty plot showing all of the components
             try:
-                
-                #utils.pretty_plot(st, stack, eve, not_used, comp, inv, paramdic)
+
+                utils.pretty_plot_small(st, stack, eve, not_used, comp, inv, paramdic)
                 utils.write_event_results(st, net, stack, eve, not_used, comp, inv, paramdic)
-                print('########################### We wrote some results ##################3')
+                print('########################### We wrote some results ##################')
             except:
                 if debug:
                     print('Problem')
@@ -69,58 +74,63 @@ if small:
         return
 
 
+    if multithread:
+        from multiprocessing import Pool
+        if 'pool' not in vars():
+            pool = Pool(5)
+        print('We have ' + str(len(cat)) + ' events')
+        pool.map(proc_event, cat)
+    else:
+        for eve in cat:
+            proc_event(eve)
 
-    #from multiprocessing import Pool
-    for eve in cat:
-        proc_event(eve)
-        #import sys
-        #sys.exit()
-    #if 'pool' not in vars():
-    #    pool = Pool(60)
-    #pool.map(proc_event, cat)
-    
+
 else:
     minlon, Mlon, minlat, Mlat = utils.min_max_coors(inv)
     # We want to eventually scrub the inventory
-    
+
     paramdic = utils.get_parameters('P')
     mlon, mlat = utils.mean_coors(inv)
-    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'], 
+    cat = client.get_events(starttime=stime, endtime=etime, minmagnitude=paramdic['min_mag'], maxmagnitude=paramdic['max_mag'],
                         latitude=mlat, longitude=mlon, maxradius=paramdic['max_radius'], minradius = paramdic['min_radius'])
 
     def proc_event(eve):
         for lat in np.arange(minlat, Mlat, 1.):
             for lon in np.arange(minlon, Mlon, 1.):
-                
+
                 if utils.check_files(net, paramdic, eve, lat, lon):
                     print('Already computed this event')
                     continue
                 try:
                     inv = client.get_stations(starttime=stime, endtime=etime, station="*",
-                              channel="*H*", network="IU,N4,US,II", level="response", latitude=lat,
+                              channel="*H*", network="N4", level="response", latitude=lat,
                               longitude=lon, maxradius=paramdic['station_radius'])
                 except:
                     print('No stations for: ' + str(lat) + ' '  + str(lon))
                     continue
-                
+
                 inv = utils.scrub_inventory(inv)
 
                 if len(inv[0]) < 3:
                     print('too few stations')
                     continue
 
-                ## Get the data 
+                ## Get the data
                 try:
                     st, bad_stas = utils.get_data(inv, eve, paramdic, model, client)
                     st = utils.proc_data(st, inv, paramdic, eve)
                 except:
                     return
-                
+
                 for comp in ['Z', 'R']:
                     if len(st.select(component=comp)) < 3:
                         continue
                     stack, not_used = utils.comp_stack(st, comp)
-                    
+
+                    if comp == 'R':
+                        ors = utils.azimuth_check(stack, st, debug = True)
+
+
                     if len(stack) == 0:
                         print('Bad event')
                         continue
@@ -130,7 +140,7 @@ else:
                         utils.pretty_plot(st, stack, eve, not_used, comp, inv, paramdic)
                         ## Add the lats and lons for book keeping.
                         utils.write_event_results(st, net, stack, eve, not_used, comp, inv, paramdic, lat, lon)
-                        
+
                     except:
                         print('Problem')
                         print(eve)
@@ -139,11 +149,10 @@ else:
                 print(eve)
         return
 
-            
+
     for eve in cat:
         proc_event(eve)
-    #from multiprocessing import Pool
+    from multiprocessing import Pool
     #if 'pool' not in vars():
-    #    pool = Pool(80)
+    #    pool = Pool(30)
     #pool.map(proc_event, cat)
-
