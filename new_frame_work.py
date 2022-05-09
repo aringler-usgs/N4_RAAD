@@ -11,8 +11,8 @@ debug = True
 net = "PR"
 model = TauPyModel(model="iasp91")
 client = Client()
-stime = UTCDateTime('2019-01-01T00:00:00')
-etime = UTCDateTime('2022-01-01T00:00:00')
+stime = UTCDateTime('2019-05-01T00:00:00')
+etime = UTCDateTime('2022-05-01T00:00:00')
 multithread = True
 #stime = UTCDateTime('2019-06-25T07:00:00')
 #etime = UTCDateTime('2019-06-25T10:00:00')
@@ -77,7 +77,7 @@ if small:
     if multithread:
         from multiprocessing import Pool
         if 'pool' not in vars():
-            pool = Pool(5)
+            pool = Pool(15)
         print('We have ' + str(len(cat)) + ' events')
         pool.map(proc_event, cat)
     else:

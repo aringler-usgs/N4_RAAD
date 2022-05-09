@@ -28,7 +28,7 @@ def setupmap(central_lon, central_lat,handle):
     return handle
 
 
-net ='N4'
+net ='PR'
 comps = ['Z', 'R']
 inv = plot_utils.get_dataless(net)
 ax ={}
